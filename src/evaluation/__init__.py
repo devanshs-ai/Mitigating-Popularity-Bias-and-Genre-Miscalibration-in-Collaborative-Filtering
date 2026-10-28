@@ -8,7 +8,10 @@ from .metrics import (
     compute_aggregate_metrics,
     compute_total_variation_distance,
     compute_genre_entropy,
-    compute_paired_ttest
+    compute_paired_ttest,
+    compute_decade_tvd,
+    compute_decade_bucket,
+    compute_mean_ci
 )
 
 __all__ = [
@@ -21,5 +24,8 @@ __all__ = [
     "compute_aggregate_metrics",
     "compute_total_variation_distance",
     "compute_genre_entropy",
-    "compute_paired_ttest"
+    "compute_paired_ttest",
+    "compute_decade_tvd",
+    "compute_decade_bucket",
+    "compute_mean_ci"
 ]

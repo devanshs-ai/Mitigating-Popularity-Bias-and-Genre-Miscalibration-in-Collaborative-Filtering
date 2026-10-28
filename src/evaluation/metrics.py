@@ -8,6 +8,7 @@ Implements:
 """
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
 
@@ -165,3 +166,59 @@ def compute_paired_ttest(metric_a, metric_b):
     from scipy.stats import ttest_rel
     stat, p_val = ttest_rel(metric_a, metric_b)
     return {"t_stat": float(stat), "p_value": float(p_val)}
+
+
+def compute_decade_bucket(year):
+    """Maps release year into one of 6 historical decade buckets."""
+    if pd.isna(year):
+        return 3  # default 1990s
+    year = int(year)
+    if year < 1970:
+        return 0  # Pre-1970
+    elif year < 1980:
+        return 1  # 1970s
+    elif year < 1990:
+        return 2  # 1980s
+    elif year < 2000:
+        return 3  # 1990s
+    elif year < 2010:
+        return 4  # 2000s
+    else:
+        return 5  # 2010s+
+
+
+def compute_decade_tvd(user_decade_dist, recommended_movie_ids, movie_year_map):
+    """
+    TRULY INDEPENDENT CALIBRATION METRIC:
+    Evaluates distribution discrepancy across release decades.
+    Because the re-ranker ONLY optimizes genre D_KL, testing on release decade
+    proves whether temporal taste calibration is preserved or distorted.
+    """
+    rec_buckets = np.zeros(6, dtype=float)
+    for m in recommended_movie_ids:
+        yr = movie_year_map.get(m, np.nan)
+        b = compute_decade_bucket(yr)
+        rec_buckets[b] += 1.0
+
+    if np.sum(rec_buckets) > 0:
+        rec_dist = rec_buckets / np.sum(rec_buckets)
+    else:
+        rec_dist = np.ones(6) / 6.0
+
+    return compute_total_variation_distance(user_decade_dist, rec_dist)
+
+
+def compute_mean_ci(data, confidence=0.95):
+    """Returns mean, standard error, and 95% confidence interval [lower, upper]."""
+    arr = np.asarray(data, dtype=float)
+    n = len(arr)
+    mean = float(np.mean(arr))
+    sem = float(np.std(arr, ddof=1) / np.sqrt(n)) if n > 1 else 0.0
+    h = sem * 1.96
+    return {
+        "mean": mean,
+        "sem": sem,
+        "ci_lower": mean - h,
+        "ci_upper": mean + h,
+        "ci_str": f"[{mean - h:.4f}, {mean + h:.4f}]"
+    }

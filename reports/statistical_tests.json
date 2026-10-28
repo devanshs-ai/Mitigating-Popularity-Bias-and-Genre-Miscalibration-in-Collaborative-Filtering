@@ -1,54 +1,80 @@
 {
     "n_test_users": 497,
-    "best_tuned_lambda": 0.8,
-    "paired_ttest_D_KL_vs_SVD": {
+    "lambda_tuned": 0.8,
+    "mmr_theta_tuned": 0.2,
+    "ndcg_diff_vs_svd": {
+        "mean": -0.004654057980569147,
+        "sem": 0.004125445121230745,
+        "ci_lower": -0.012739930418181406,
+        "ci_upper": 0.0034318144570431126,
+        "ci_str": "[-0.0127, 0.0034]"
+    },
+    "ndcg_diff_vs_steck": {
+        "mean": -0.005308692016853933,
+        "sem": 0.0009999123328980793,
+        "ci_lower": -0.007268520189334168,
+        "ci_upper": -0.0033488638443736974,
+        "ci_str": "[-0.0073, -0.0033]"
+    },
+    "ttest_ndcg_vs_svd": {
+        "t_stat": -1.1281347451740433,
+        "p_val": 0.2598084051027276
+    },
+    "ttest_ndcg_vs_steck": {
+        "t_stat": -5.309157455301679,
+        "p_val": 1.6647465175973537e-07
+    },
+    "ttest_dkl_vs_svd": {
         "t_stat": -32.960338878249075,
         "p_val": 4.845741939216042e-127
     },
-    "paired_ttest_TVD_vs_SVD": {
-        "t_stat": -44.09409921828339,
-        "p_val": 9.933337975220555e-174
+    "ttest_dkl_vs_steck": {
+        "t_stat": -3.0285897011008878,
+        "p_val": 0.0025850018131860063
     },
-    "paired_ttest_NDCG_vs_SVD": {
-        "t_stat": -1.1281347451740433,
-        "p_val": 0.2598084051027276
+    "ttest_novelty_vs_steck": {
+        "t_stat": 21.584940327390193,
+        "p_val": 2.35845252778133e-73
     },
     "table": [
         {
             "Model": "Plain SVD",
-            "Precision@10": "0.0445 \u00b1 0.0039",
+            "Precision@10": "0.0445 \u00b1 0.0040",
             "NDCG@10": "0.0561 \u00b1 0.0050",
+            "NDCG 95% CI": "[0.0463, 0.0658]",
             "Diversity (ILD)": "0.9745",
             "Novelty (Bits)": "10.52",
-            "Calibration D_KL": "1.4909 \u00b1 0.0397",
-            "Total Variation Dist (L1)": "0.3621",
-            "Genre Entropy H(Q)": "3.3193",
+            "Calibration D_KL": "1.4909 \u00b1 0.0398",
+            "Genre TVD (L1)": "0.3621",
+            "Decade TVD (Independent)": "0.5561 \u00b1 0.0083",
             "Catalog Coverage (%)": "3.30%",
             "Recommendation Gini": "0.9909",
             "Long-Tail Exposure (%)": "1.23%"
         },
         {
             "Model": "SVD + MMR (1998)",
-            "Precision@10": "0.0441 \u00b1 0.0038",
-            "NDCG@10": "0.0550 \u00b1 0.0049",
-            "Diversity (ILD)": "0.9848",
-            "Novelty (Bits)": "10.59",
-            "Calibration D_KL": "1.3036 \u00b1 0.0367",
-            "Total Variation Dist (L1)": "0.3447",
-            "Genre Entropy H(Q)": "3.3940",
-            "Catalog Coverage (%)": "3.41%",
-            "Recommendation Gini": "0.9907",
-            "Long-Tail Exposure (%)": "1.29%"
+            "Precision@10": "0.0402 \u00b1 0.0035",
+            "NDCG@10": "0.0517 \u00b1 0.0046",
+            "NDCG 95% CI": "[0.0427, 0.0607]",
+            "Diversity (ILD)": "0.9927",
+            "Novelty (Bits)": "10.74",
+            "Calibration D_KL": "1.1471 \u00b1 0.0326",
+            "Genre TVD (L1)": "0.3340",
+            "Decade TVD (Independent)": "0.5649 \u00b1 0.0081",
+            "Catalog Coverage (%)": "3.59%",
+            "Recommendation Gini": "0.9903",
+            "Long-Tail Exposure (%)": "1.49%"
         },
         {
             "Model": "Steck Calibrated SVD (2018)",
             "Precision@10": "0.0473 \u00b1 0.0039",
             "NDCG@10": "0.0567 \u00b1 0.0048",
+            "NDCG 95% CI": "[0.0472, 0.0662]",
             "Diversity (ILD)": "0.9764",
             "Novelty (Bits)": "10.68",
             "Calibration D_KL": "0.2081 \u00b1 0.0051",
-            "Total Variation Dist (L1)": "0.1996",
-            "Genre Entropy H(Q)": "3.6513",
+            "Genre TVD (L1)": "0.1996",
+            "Decade TVD (Independent)": "0.5401 \u00b1 0.0085",
             "Catalog Coverage (%)": "4.00%",
             "Recommendation Gini": "0.9895",
             "Long-Tail Exposure (%)": "1.83%"
@@ -57,11 +83,12 @@
             "Model": "Proposed Calibrated & Novelty SVD (Ours)",
             "Precision@10": "0.0414 \u00b1 0.0037",
             "NDCG@10": "0.0514 \u00b1 0.0047",
+            "NDCG 95% CI": "[0.0422, 0.0606]",
             "Diversity (ILD)": "0.9774",
             "Novelty (Bits)": "10.92",
             "Calibration D_KL": "0.2023 \u00b1 0.0049",
-            "Total Variation Dist (L1)": "0.1997",
-            "Genre Entropy H(Q)": "3.6617",
+            "Genre TVD (L1)": "0.1997",
+            "Decade TVD (Independent)": "0.5560 \u00b1 0.0085",
             "Catalog Coverage (%)": "4.36%",
             "Recommendation Gini": "0.9887",
             "Long-Tail Exposure (%)": "2.15%"
