@@ -1,0 +1,76 @@
+{
+    "svd_rmse": 0.8852120428947007,
+    "svd_mae": 0.678306851701151,
+    "table": [
+        {
+            "Model": "Popularity (IMDb WR)",
+            "Precision@10": 0.09200000000000001,
+            "Recall@10": 0.07544349013001216,
+            "F1@10": 0.06633928206384752,
+            "NDCG@10": 0.11173284184598994,
+            "MAP@10": 0.05267484882842026,
+            "Diversity (ILD)": 0.9500992928735599,
+            "Novelty (Bits)": 8.985184909230215,
+            "Calibration D_KL": 1.8726307091806174,
+            "Catalog Coverage (%)": 0.4003284746458633,
+            "Recommendation Gini": 0.9982867994251694,
+            "Long-Tail Exposure (%)": 0.0
+        },
+        {
+            "Model": "Content-Based (TF-IDF)",
+            "Precision@10": 0.006,
+            "Recall@10": 0.004940174816007908,
+            "F1@10": 0.004486232012049908,
+            "NDCG@10": 0.008273676791603863,
+            "MAP@10": 0.0035968253968253973,
+            "Diversity (ILD)": 0.20088288121334974,
+            "Novelty (Bits)": 14.314434188673454,
+            "Calibration D_KL": 3.3444284382215757,
+            "Catalog Coverage (%)": 4.300964894272223,
+            "Recommendation Gini": 0.977872716074728,
+            "Long-Tail Exposure (%)": 44.6
+        },
+        {
+            "Model": "Collaborative (SVD)",
+            "Precision@10": 0.028000000000000004,
+            "Recall@10": 0.024165924339829954,
+            "F1@10": 0.02153736697949236,
+            "NDCG@10": 0.03792036470184284,
+            "MAP@10": 0.014858465608465607,
+            "Diversity (ILD)": 0.9755614409992563,
+            "Novelty (Bits)": 10.53890894802058,
+            "Calibration D_KL": 1.482964190363538,
+            "Catalog Coverage (%)": 2.0324368712789984,
+            "Recommendation Gini": 0.9917129952781769,
+            "Long-Tail Exposure (%)": 1.4000000000000001
+        },
+        {
+            "Model": "Linear Hybrid (alpha=0.6)",
+            "Precision@10": 0.008,
+            "Recall@10": 0.004921366038578441,
+            "F1@10": 0.0049641688039401876,
+            "NDCG@10": 0.010002975537736708,
+            "MAP@10": 0.0042785714285714285,
+            "Diversity (ILD)": 0.244930796625314,
+            "Novelty (Bits)": 14.157712845512133,
+            "Calibration D_KL": 3.064710075559469,
+            "Catalog Coverage (%)": 3.7877232601108606,
+            "Recommendation Gini": 0.9808185177581605,
+            "Long-Tail Exposure (%)": 41.3
+        },
+        {
+            "Model": "Calibrated Reranked Hybrid",
+            "Precision@10": 0.006,
+            "Recall@10": 0.003988303158253897,
+            "F1@10": 0.003710607550378935,
+            "NDCG@10": 0.00794207181396804,
+            "MAP@10": 0.0035523809523809523,
+            "Diversity (ILD)": 0.355183705688376,
+            "Novelty (Bits)": 14.442389075429805,
+            "Calibration D_KL": 1.8215820998990653,
+            "Catalog Coverage (%)": 3.6542804352289058,
+            "Recommendation Gini": 0.9820273044549374,
+            "Long-Tail Exposure (%)": 49.0
+        }
+    ]
+}
