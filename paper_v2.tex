@@ -1,516 +1,512 @@
-% =====================================================================
-% Mitigating Popularity Bias and Genre Miscalibration in Collaborative
-% Filtering: A Calibrated and Novelty-Aware Re-ranking Framework
-% IEEE conference format (IEEEtran)  --  version 2
-%
-% Compile: pdflatex paper_v2.tex  (run twice)
-% Figures: put images in a "figures/" folder next to this file. If a file
-% is missing, a labelled placeholder box is drawn so the paper compiles.
-% Items marked \todo{...} (red) need your data or a check; remove before
-% submission.
-% =====================================================================
-\documentclass[conference]{IEEEtran}
-
-\usepackage[utf8]{inputenc}
-\usepackage[T1]{fontenc}
-\usepackage{cite}
-\usepackage{amsmath,amssymb,amsfonts}
-\usepackage{graphicx}
-\usepackage{booktabs}
-\usepackage{array}
-\usepackage{xcolor}
-\usepackage{algorithm}
-\usepackage{algpseudocode}
-\usepackage{textcomp}
-\usepackage[hidelinks]{hyperref}
-
-\graphicspath{{figures/}}
-
-\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
-
-\newcommand{\figbox}[3]{%
-  \IfFileExists{figures/#2}{%
-    \includegraphics[width=#1]{#2}%
-  }{%
-    \fbox{\parbox[c][4.2cm][c]{#1}{\centering\small\color{gray}
-      \textbf{[PLACEHOLDER]}\\ \texttt{\detokenize{#2}}\\[2pt] #3}}%
-  }%
-}
-
-\DeclareMathOperator*{\argmax}{arg\,max}
-\newcommand{\KL}{D_{\mathrm{KL}}}
-\newcommand{\TVD}{\mathrm{TVD}}
-
-\begin{document}
-
-\title{Mitigating Popularity Bias and Genre Miscalibration in Collaborative Filtering: A Calibrated and Novelty-Aware Re-ranking Framework}
-
-\author{
-\IEEEauthorblockN{Devansh Sharma}
-\IEEEauthorblockA{\textit{Dept.\ of Computer Science \& Engineering}\\
-\textit{Manipal University Jaipur}\\
-Jaipur, India\\
-Reg.\ No.\ 23FE10CSE00470}
-\and
-\IEEEauthorblockN{Ekaansh Sawaria}
-\IEEEauthorblockA{\textit{Dept.\ of Computer Science \& Engineering}\\
-\textit{Manipal University Jaipur}\\
-Jaipur, India\\
-Reg.\ No.\ 23FE10CSE00450}
-}
-
-\maketitle
-
-% =====================================================================
-\begin{abstract}
-Matrix-factorization recommenders trained for rating accuracy tend to over-recommend popular items and to over-represent a user's dominant genre. This paper studies post-hoc re-ranking of SVD recommendations on MovieLens Latest Small (100{,}836 ratings, 610 users, 9{,}724 rated movies, 98.30\% sparse) under full-catalogue ranking. Hyper-parameters are tuned on a 100-user validation cohort and results are reported on 497 held-out test users. We compare Plain SVD, SVD with Maximal Marginal Relevance (MMR), a Steck-style calibrated re-ranker, and a \emph{novelty-augmented calibrated re-ranker} that adds a self-information term to the calibration objective. Genre calibration comes almost entirely from the calibration objective itself: both calibrated methods reduce the Kullback--Leibler calibration error from 1.4909 (Plain SVD) to about 0.20, and the difference between them is small (0.2023 vs.\ 0.2081). The novelty term provides a tunable trade-off on top of this: at the default setting it raises catalogue coverage from 4.00\% to 4.36\% and long-tail exposure from 1.83\% to 2.15\% relative to the calibrated baseline, at a 9.3\% relative loss in NDCG@10 (paired difference $-0.0053$, 95\% CI $[-0.0073,-0.0033]$). Larger candidate pools and novelty weights raise long-tail exposure to 6--9\% at progressively higher accuracy cost. At comparable long-tail exposure, the method retains higher NDCG@10 and far lower calibration error than an ad-hoc popularity penalty. Genre calibration does not transfer to an independent attribute (release decade), which we report as a negative result.
-\end{abstract}
-
-\begin{IEEEkeywords}
-Recommender systems, collaborative filtering, popularity bias, calibrated recommendations, long-tail exposure, Kullback--Leibler divergence, re-ranking, MovieLens.
-\end{IEEEkeywords}
-
-% =====================================================================
-\section{Introduction}
-Recommender systems reduce information overload by predicting and presenting relevant items from large catalogues \cite{ricci2015}. Latent-factor collaborative filtering (CF) \cite{koren2009,funk2006} is usually trained and validated on rating error or top-$K$ accuracy, but accuracy alone does not guarantee a healthy recommendation ecosystem \cite{herlocker2004,vargas2011}.
-
-Two effects are of particular concern. \emph{Popularity bias} causes models to over-recommend the head of the popularity distribution, leaving long-tail items under-exposed even when they are equally relevant \cite{abdollahpouri2019,abdollahpouri2017,jannach2015}. \emph{Genre miscalibration} occurs when a list over-represents a user's most frequent genre and under-represents secondary tastes. Steck \cite{steck2018} addresses the latter by minimizing the Kullback--Leibler (KL) divergence between the user's historical category distribution and that of the recommended list.
-
-Calibration does not by itself promote long-tail items, and diversity-only re-rankers such as MMR \cite{carbonell1998} do not respect a user's genre proportions. We therefore ask a focused question: \emph{what does adding an explicit novelty (self-information) term to a calibrated re-ranker buy, and at what accuracy cost?}
-
-\subsection{Contributions}
-\begin{itemize}
-  \item A re-ranking objective that augments a Steck-style KL calibration term with a novelty term, reducing to Plain SVD and to the calibrated baseline as special cases (Section~\ref{sec:obj}).
-  \item A leakage-aware evaluation protocol: full-catalogue ranking, a separate validation cohort for tuning ($N=100$), held-out testing ($N=497$), and train-only popularity statistics.
-  \item An honest accounting of the trade-offs, with paired tests and confidence intervals, sensitivity analyses over the candidate pool and the novelty weight, and a comparison with a popularity-penalty baseline.
-  \item A negative result: genre calibration does not transfer to release-decade calibration.
-\end{itemize}
-
-% =====================================================================
-\section{Related Work}\label{sec:related}
-\subsection{Collaborative and Content-Based Recommendation}
-CF infers preferences from collective interaction history; GroupLens \cite{resnick1994} established the paradigm and item-based methods scaled it \cite{sarwar2001}. Matrix factorization embeds users and items in a shared latent space \cite{koren2009}, and regularized SGD \cite{funk2006} is a classical optimizer for explicit ratings. Content-based filtering uses item attributes with TF-IDF weighting \cite{salton1988} and cosine similarity \cite{lops2011}; hybrids combine both signals, notably to mitigate cold start \cite{burke2002,adomavicius2005,schein2002}.
-
-\subsection{Bias, Diversity, and Calibration}
-Herlocker \emph{et al.}\ \cite{herlocker2004} argue for evaluation beyond RMSE/MAE, and Vargas and Castells \cite{vargas2011} formalize rank-aware novelty and diversity. Abdollahpouri \emph{et al.}\ document the unfairness of popularity bias \cite{abdollahpouri2019} and propose regularization to control it \cite{abdollahpouri2017}; Jannach \emph{et al.}\ \cite{jannach2015} analyse what recommenders actually recommend. MMR \cite{carbonell1998} greedily trades relevance against similarity to already-selected items. Steck \cite{steck2018} introduces calibrated recommendations, which minimize the KL divergence between the user's historical distribution over item categories and the list's distribution.
-
-\begin{table}[t]
-\centering
-\caption{Key Related Work and Role in This Paper}
-\label{tab:related}
-\renewcommand{\arraystretch}{1.1}
-\small
-\begin{tabular}{@{}p{0.9cm}p{3.0cm}p{3.5cm}@{}}
-\toprule
-\textbf{Ref.} & \textbf{Contribution} & \textbf{Role here}\\
-\midrule
-\cite{koren2009,funk2006} & Matrix factorization, regularized SGD & Base SVD model\\
-\cite{herlocker2004} & Evaluation beyond RMSE & Decision-support metrics\\
-\cite{vargas2011} & Novelty and diversity metrics & Self-information novelty\\
-\cite{steck2018} & Calibrated recommendations & Calibration objective; baseline\\
-\cite{abdollahpouri2019,abdollahpouri2017} & Popularity bias and its control & Motivation; exposure metrics\\
-\cite{jannach2015} & Recommendation-bias analysis & Multi-metric auditing\\
-\cite{carbonell1998} & Maximal Marginal Relevance & Diversity baseline\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Gap}
-SVD is accurate but head-heavy; MMR diversifies without respecting user taste; calibration fixes genre proportions but has no incentive to surface long-tail items. We study whether a novelty term added to the calibration objective gives a useful, controllable trade-off, and compare it with the obvious cheaper alternative, a popularity penalty.
-
-% =====================================================================
-\section{Methodology}\label{sec:method}
-\subsection{Pipeline and Protocol}
-Raw ratings, movies and tags are preprocessed (title cleaning, release-year extraction, tag aggregation). A per-user 80/20 split yields training and test interactions. A base SVD model \cite{hug2020} is trained on the training data, its top-$M$ items form the candidate pool of each user, and a re-ranker selects $K=10$ items from the pool. Software: Python 3.10, pandas/NumPy, scikit-learn \cite{pedregosa2011}, scikit-surprise \cite{hug2020}, matplotlib/seaborn.
-
-\textbf{Cohorts.} We identified the 597 users with at least one relevant test item (rating $\ge 4.0$) and partitioned them into a \emph{validation cohort} ($N=100$), used only to tune hyper-parameters, and a \emph{test cohort} ($N=497$), used only for the final reported results. \textbf{Full-catalogue ranking.} Top-$K$ accuracy is computed against all 9{,}724 rated movies rather than sampled negatives, so absolute precision values are low (about 0.04--0.05) and are not comparable to sampled-negative protocols. \textbf{Train-only statistics.} Item counts used for novelty and for the long-tail definition are computed on training ratings only. \textbf{Unrated candidates.} Candidate items for each user are strictly drawn from catalog items not present in the user's training set.
-
-\subsection{Dataset}
-We use MovieLens Latest Small \cite{harper2015}; its statistics are in Table~\ref{tab:data} and Figs.~\ref{fig:eda1}--\ref{fig:eda2}.
-
-\begin{table}[t]
-\centering
-\caption{Dataset Summary}
-\label{tab:data}
-\renewcommand{\arraystretch}{1.1}
-\small
-\begin{tabular}{@{}lr@{}}
-\toprule
-\textbf{Property} & \textbf{Value}\\
-\midrule
-Users & 610\\
-Rated movies (catalogue 9{,}742) & 9{,}724\\
-Explicit ratings & 100{,}836\\
-Rating scale & 0.5--5.0\\
-Mean / median / std.\ rating & 3.502 / 3.500 / 1.043\\
-Matrix sparsity & 98.30\%\\
-Ratings per user (mean/median/max) & 165.3 / 70.5 / 2{,}698\\
-Ratings per movie (mean/median/max) & 10.4 / 3.0 / 329\\
-Item Gini coefficient & 0.7163\\
-Interaction share of top 20\% items & 77.03\%\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[t]
-\centering
-\figbox{0.95\columnwidth}{fig1_eda_rating_and_longtail.png}{(a) rating distribution; (b) ratings-per-movie long-tail}
-\caption{(a) Ratings are positively skewed (mode 4.0). (b) Interaction volume is highly concentrated: the top 20\% most-rated movies account for 77.03\% of ratings (Gini $=0.7163$).}
-\label{fig:eda1}
-\end{figure}
-
-\begin{figure}[t]
-\centering
-\figbox{0.95\columnwidth}{fig2_eda_genre_distribution.png}{rating volume and mean rating per genre}
-\caption{Genre statistics. Volume is concentrated in Drama (41{,}928 ratings) and Comedy (27{,}653); niche genres such as Film-Noir and War have the highest mean ratings despite low volume.}
-\label{fig:eda2}
-\end{figure}
-
-\subsection{Models}
-\subsubsection{Plain SVD}
-The biased latent-factor model $\widehat{r}_{ui}=\mu+b_u+b_i+\mathbf{q}_i^{\top}\mathbf{p}_u$ is trained by SGD on the regularized squared error \cite{funk2006}, with $k=100$ factors, 20 epochs, learning rate $0.005$ and regularization $0.02$. The top-$K$ items by $\widehat{r}_{ui}$ form the list.
-
-\subsubsection{SVD + MMR}
-MMR \cite{carbonell1998} greedily selects the item maximizing $\theta\,\widehat{r}^{\text{norm}}_{ui}-(1-\theta)\max_{j\in R_u}\cos(\mathbf{v}_i,\mathbf{v}_j)$, where $\mathbf{v}_i$ are TF-IDF item vectors \cite{salton1988}. The trade-off $\theta\in[0.2,0.8]$ was tuned on the validation cohort ($\theta^*=0.60$).
-
-\subsubsection{Calibration Quantities}
-Let $\mathcal{G}$ be the $C=19$ genres. The user's genre distribution is
-\begin{equation}
-p(g\mid u)=\frac{w(g\mid u)+\epsilon}{\sum_{g'}w(g'\mid u)+C\epsilon},\quad w(g\mid u)=\sum_{i\in\mathcal{I}_u}\tfrac{r_{ui}}{5}\,\mathbb{I}(g\in\mathrm{genres}(i)),
-\end{equation}
-with $\epsilon=10^{-5}$, and the list distribution is
-\begin{equation}
-q(g\mid R_u)=\frac{\sum_{i\in R_u}\mathbb{I}(g\in\mathrm{genres}(i))+\epsilon}{\sum_{g'}\sum_{i\in R_u}\mathbb{I}(g'\in\mathrm{genres}(i))+C\epsilon}.
-\end{equation}
-Calibration error is $\KL(P\parallel Q)=\sum_{g}p(g\mid u)\log\frac{p(g\mid u)}{q(g\mid R_u)}$. Item novelty is the self-information $\mathrm{Nov}(i)=-\log_2\frac{\max(\mathrm{count}(i),1)}{|\mathcal{R}_{\text{train}}|}$.
-
-\subsubsection{Calibrated and Novelty-Aware Re-ranking}\label{sec:obj}
-From the top-$M$ SVD candidates $\mathcal{C}_u$, items are added greedily until $|R_u|=K$:
-\begin{equation}
-i^{*}=\argmax_{i\in\mathcal{C}_u\setminus R_u}\Big[(1-\lambda)\,\widehat{r}^{\text{norm}}_{ui}-\lambda\,\KL\big(P(u)\parallel Q(R_u\cup\{i\})\big)+\gamma\,\mathrm{Nov}^{\text{norm}}(i)\Big],
-\label{eq:obj}
-\end{equation}
-where $\widehat{r}^{\text{norm}}_{ui}$ and $\mathrm{Nov}^{\text{norm}}$ are min--max normalized over the pool. Setting $\lambda=\gamma=0$ gives Plain SVD; $\gamma=0,\lambda>0$ gives a \emph{Steck-style} calibrated re-ranker (our smoothing uses a fixed $\epsilon$ rather than Steck's mixing of $Q$ with $P$ \cite{steck2018}); $\gamma>0,\lambda>0$ is the proposed method. Algorithm~\ref{alg:rerank} gives the procedure.
-
-\begin{algorithm}[t]
-\caption{Calibrated and Novelty-Aware Greedy Re-ranking}
-\label{alg:rerank}
-\begin{algorithmic}[1]
-\Require Top-$M$ SVD candidates $\mathcal{C}_u$, profile $P(u)$, $K$, $\lambda$, $\gamma$
-\State $R_u\gets\emptyset$
-\While{$|R_u|<K$}
-  \ForAll{$i\in\mathcal{C}_u\setminus R_u$}
-    \State $J(i)\gets(1-\lambda)\widehat{r}^{\text{norm}}_{ui}-\lambda\,\KL(P(u)\parallel Q(R_u\cup\{i\}))+\gamma\,\mathrm{Nov}^{\text{norm}}(i)$
-  \EndFor
-  \State $R_u\gets R_u\cup\{\argmax_i J(i)\}$
-\EndWhile
-\State \Return $R_u$
-\end{algorithmic}
-\end{algorithm}
-
-\subsubsection{Popularity-Penalty Baseline}
-As the obvious cheaper alternative we use $\mathrm{Score}(i)=\widehat{r}_{ui}-\beta\log(1+\mathrm{count}(i))$ with counts from training data.
-
-\subsection{Metrics}
-\begin{itemize}
-  \item \textbf{NDCG@10, Precision@10:} relevance is $r_{ui}\ge4.0$ on held-out items; $\mathrm{DCG}@K=\sum_{i=1}^{K}\frac{2^{\mathrm{rel}_i}-1}{\log_2(i+1)}$ normalized by the ideal DCG.
-  \item \textbf{Calibration $\KL$:} genre-based, as above (lower is better); this is the quantity the method optimizes.
-  \item \textbf{Decade TVD (independent):} total variation distance $\TVD(P,Q)=\tfrac12\sum_{d}|p(d\mid u)-q(d\mid R_u)|$ over release decades $d$, an attribute the re-ranker never observes.
-  \item \textbf{Novelty (bits):} mean self-information of the list.
-  \item \textbf{Catalogue coverage:} share of catalogue items recommended to at least one test user.
-  \item \textbf{Long-tail exposure:} share of recommended items in the bottom 80\% of items by training count.
-\end{itemize}
-Results are means $\pm$ standard error over test users. Differences are assessed with two-sided paired $t$-tests across users ($df=496$), reported with 95\% confidence intervals and Holm correction \cite{holm1979} across the family of comparisons.
-
-% =====================================================================
-\section{Experiments and Results}\label{sec:exp}
-\subsection{Rating Prediction}
-On the per-user hold-out split, SVD obtains RMSE $0.8852$ and MAE $0.6783$ over 20{,}164 test ratings.
-
-\subsection{Validation-Based Tuning}
-$\lambda$ was tuned on the validation cohort (Table~\ref{tab:val}), with $\gamma=0.05$ and $M=100$. Calibration error falls steadily as $\lambda$ grows while NDCG@10 stays in a narrow band (0.038--0.045), with the sampling noise expected from 100 users. The value $\lambda^*=0.8$ gave the lowest validation $\KL$ among the settings tried.
-
-\begin{table}[t]
-\centering
-\caption{Validation Sweep over $\lambda$ ($N=100$, $M=100$, $\gamma=0.05$)}
-\label{tab:val}
-\renewcommand{\arraystretch}{1.1}
-\small
-\begin{tabular}{@{}ccc@{}}
-\toprule
-$\boldsymbol\lambda$ & \textbf{$\KL$} & \textbf{NDCG@10}\\
-\midrule
-0.0 & 1.4864 & 0.0451\\
-0.1 & 0.9167 & 0.0452\\
-0.2 & 0.6886 & 0.0427\\
-0.3 & 0.5467 & 0.0435\\
-0.4 & 0.4764 & 0.0427\\
-0.5 & 0.4176 & 0.0423\\
-0.6 & 0.3450 & 0.0376\\
-0.7 & 0.2805 & 0.0428\\
-\textbf{0.8} & \textbf{0.2242} & \textbf{0.0427}\\
-0.9 & 0.1644 & 0.0432\\
-1.0 & 0.1257 & 0.0322\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Main Benchmark on Held-Out Users}
-Table~\ref{tab:main} reports the four models on the 497 test users at the main configuration ($M=100$, $\lambda=0.8$, $\gamma=0.05$, $\theta=0.6$). Fig.~\ref{fig:exposure} shows exposure and coverage.
-
-\begin{table*}[t]
-\centering
-\caption{Benchmark on Held-Out Test Users ($N=497$, $K=10$, full-catalogue ranking, mean $\pm$ SEM)}
-\label{tab:main}
-\renewcommand{\arraystretch}{1.1}
-\small
-\begin{tabular}{@{}lccccccc@{}}
-\toprule
-\textbf{Model} & \textbf{NDCG@10} & \textbf{P@10} & \textbf{Genre $\KL$} & \textbf{Decade TVD} & \textbf{Novelty} & \textbf{Coverage} & \textbf{Long-tail}\\
-\midrule
-Plain SVD & 0.0561 $\pm$ 0.0050 & 0.0445 $\pm$ 0.0040 & 1.4909 $\pm$ 0.0398 & 0.5561 $\pm$ 0.0083 & 10.52 & 3.30\% & 1.23\%\\
-SVD + MMR \cite{carbonell1998} & 0.0517 $\pm$ 0.0046 & 0.0402 $\pm$ 0.0035 & 1.1471 $\pm$ 0.0326 & 0.5649 $\pm$ 0.0081 & 10.74 & 3.59\% & 1.49\%\\
-Steck-style calibrated & \textbf{0.0567} $\pm$ 0.0048 & \textbf{0.0473} $\pm$ 0.0039 & 0.2081 $\pm$ 0.0051 & \textbf{0.5401} $\pm$ 0.0085 & 10.68 & 4.00\% & 1.83\%\\
-Proposed (novelty-aware) & 0.0514 $\pm$ 0.0047 & 0.0414 $\pm$ 0.0037 & \textbf{0.2023} $\pm$ 0.0049 & 0.5560 $\pm$ 0.0085 & \textbf{10.92} & \textbf{4.36\%} & \textbf{2.15\%}\\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\begin{figure}[t]
-\centering
-\figbox{0.95\columnwidth}{fig4_exposure_and_coverage_comparison.png}{long-tail exposure, coverage and Gini per model}
-\caption{Exposure and coverage of the four models on the test cohort. All methods remain strongly head-heavy in absolute terms.}
-\label{fig:exposure}
-\end{figure}
-
-\textbf{Calibration.} Plain SVD has a genre calibration error of 1.4909. Both calibrated methods reduce it by about 86\% (to 0.2081 for the Steck-style baseline and 0.2023 for the proposed method). The remaining difference between them is statistically detectable but practically small, so we regard the two as comparable and attribute the calibration gain to the calibration objective rather than to the novelty term. MMR reduces $\KL$ only moderately (1.1471), as it diversifies without regard to user taste. On total variation distance over genres, Plain SVD scores 0.3621 and both calibrated methods about 0.1996--0.1997.
-
-\textbf{Novelty, coverage and long-tail exposure.} Relative to the Steck-style baseline, the novelty term raises novelty by 0.24 bits (10.68 to 10.92), coverage by 0.36 percentage points (4.00\% to 4.36\%) and long-tail exposure by 0.32 points (1.83\% to 2.15\%). These are modest gains. Relative to Plain SVD, long-tail exposure rises from 1.23\% to 2.15\%, but the lists remain strongly head-heavy.
-
-\textbf{Accuracy cost.} The proposed method has the lowest NDCG@10 and precision of the four models. Relative to the Steck-style baseline, NDCG@10 is 9.3\% lower; relative to Plain SVD the difference is not statistically distinguishable (Section~\ref{sec:stats}), but the confidence interval is wide, so a loss of up to about 20\% cannot be excluded.
-
-\subsection{Statistical Analysis}\label{sec:stats}
-Table~\ref{tab:stats} reports paired tests on the 497 test users.
-
-\begin{table}[t]
-\centering
-\caption{Paired Tests (Proposed vs.\ Baseline, $N=497$, $df=496$)}
-\label{tab:stats}
-\renewcommand{\arraystretch}{1.1}
-\footnotesize
-\begin{tabular}{@{}p{2.0cm}p{1.1cm}p{2.2cm}c@{}}
-\toprule
-\textbf{Comparison} & \textbf{Mean diff.} & \textbf{95\% CI} & \textbf{$t$ ($p$, $p_{\mathrm{adj}}$)}\\
-\midrule
-NDCG@10 vs.\ Steck-style & $-0.0053$ & $[-0.0073,-0.0033]$ & $-5.31$ ($<0.001$, $<0.001$)\\
-NDCG@10 vs.\ Plain SVD & $-0.0047$ & $[-0.0127,+0.0034]$ & $-1.13$ (0.260, 0.260)\\
-Genre $\KL$ vs.\ Plain SVD & $-1.2886$ & $[-1.3654,-1.2118]$ & $-32.96$ ($<0.001$, $<0.001$)\\
-Genre $\KL$ vs.\ Steck-style & $-0.0058$ & $[-0.0096,-0.0020]$ & $-3.03$ (0.003, 0.005)\\
-Novelty vs.\ Steck-style & +0.24 bits & $[+0.22,+0.26]$ & $+21.58$ ($<0.001$, $<0.001$)\\
-\bottomrule
-\end{tabular}
-\\[2pt]
-\raggedright\scriptsize $p_{\mathrm{adj}}$ denotes $p$-values adjusted by the Holm--Bonferroni procedure across the 5 hypothesis tests.
-\end{table}
-
-Two points deserve emphasis. First, a non-significant difference versus Plain SVD ($p=0.26$) is not evidence of equivalence; the interval includes a loss larger than the observed mean difference. Second, the novelty gain is significant largely because novelty is directly optimized, so statistical significance should not be confused with practical importance.
-
-\subsection{Sensitivity to the Candidate Pool}
-Table~\ref{tab:pool} varies the pool size $M$ at fixed $\lambda=0.8,\gamma=0.05$. The default pool of 100 limits long-tail discovery because the top SVD candidates are overwhelmingly popular. Enlarging it raises long-tail exposure and coverage and lowers $\KL$, but accuracy decreases substantially: at $M=500$ NDCG@10 is 34\% below Plain SVD (0.0368 vs.\ 0.0561) while long-tail exposure reaches 6.38\%, about 5.2$\times$ that of SVD. Parameters $\lambda=0.80$ and $\gamma=0.05$ were held fixed at their validation-chosen values without re-tuning for each $M$, and the evaluation was conducted across the 497 test users.
-
-\begin{table}[t]
-\centering
-\caption{Effect of Candidate-Pool Size $M$ ($\lambda=0.8$, $\gamma=0.05$)}
-\label{tab:pool}
-\renewcommand{\arraystretch}{1.1}
-\footnotesize
-\begin{tabular}{@{}cccccc@{}}
-\toprule
-$\boldsymbol M$ & \textbf{NDCG} & \textbf{P@10} & \textbf{$\KL$} & \textbf{Cov.\ (\%)} & \textbf{LT (\%)}\\
-\midrule
-100 & 0.0514 & 0.0414 & 0.2023 & 4.36 & 2.15\\
-200 & 0.0467 & 0.0378 & 0.1677 & 4.87 & 2.94\\
-500 & 0.0368 & 0.0330 & 0.1448 & 5.79 & 6.38\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Sensitivity to the Novelty Weight}
-Table~\ref{tab:gamma} sweeps $\gamma$ at $M=200$, $\lambda=0.8$; $\gamma=0$ is the Steck-style baseline. Small weights ($\gamma\le0.01$) change little. Moderate weights raise long-tail exposure with a clear NDCG cost, and $\gamma=0.20$ reaches 9.40\% long-tail exposure and 7.22\% coverage but reduces NDCG@10 to 0.0290, about 47\% below the $\gamma=0$ value. Calibration error stays between 0.167 and 0.174 throughout, so the novelty term does not undermine genre calibration. $\gamma$ is therefore best viewed as an operator-controlled knob, and we do not claim a single optimal value.
-
-\begin{table}[t]
-\centering
-\caption{Effect of Novelty Weight $\gamma$ ($M=200$, $\lambda=0.8$)}
-\label{tab:gamma}
-\renewcommand{\arraystretch}{1.1}
-\footnotesize
-\begin{tabular}{@{}cccccc@{}}
-\toprule
-$\boldsymbol\gamma$ & \textbf{NDCG} & \textbf{$\KL$} & \textbf{Novelty} & \textbf{Cov.\ (\%)} & \textbf{LT (\%)}\\
-\midrule
-0.00 (Steck-style) & 0.0544 & 0.1742 & 10.71 & 4.47 & 2.23\\
-0.01 & 0.0533 & 0.1739 & 10.77 & 4.52 & 2.33\\
-0.05 & 0.0467 & 0.1677 & 11.01 & 4.87 & 2.94\\
-0.10 & 0.0393 & 0.1675 & 11.32 & 5.48 & 3.88\\
-0.20 & 0.0290 & 0.1703 & 12.11 & 7.22 & 9.40\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Comparison with a Popularity Penalty}
-Table~\ref{tab:pen} compares the method with the popularity-penalty baseline. A penalty can raise long-tail exposure, but it ignores the user's genre profile: calibration error stays at 1.5--2.1 and rises with $\beta$, and NDCG@10 collapses at large $\beta$. The configurations are not perfectly matched on exposure, so we compare nearby operating points. At roughly 4\% long-tail exposure, the penalty with $\beta=0.05$ gives 3.54\% exposure with NDCG@10 $0.0331$ and $\KL=1.54$, whereas $\gamma=0.10$ gives 3.88\% exposure with NDCG@10 $0.0393$ and $\KL=0.17$. At roughly 8--9\% exposure, $\beta=0.10$ gives 7.95\% with NDCG@10 $0.0176$, versus 9.40\% with NDCG@10 $0.0290$ for $\gamma=0.20$. In both cases the novelty-aware method retains higher accuracy and much lower calibration error, with slightly higher exposure. Fig.~\ref{fig:pareto2} plots the corresponding trade-off curves. Both the popularity-penalty baseline and the novelty-aware re-ranker were evaluated at candidate pool size $M=200$ across the 497 test users.
-
-\begin{table}[t]
-\centering
-\caption{Popularity Penalty vs.\ Proposed Method}
-\label{tab:pen}
-\renewcommand{\arraystretch}{1.1}
-\footnotesize
-\begin{tabular}{@{}lccccc@{}}
-\toprule
-\textbf{Method} & \textbf{NDCG} & \textbf{$\KL$} & \textbf{Nov.} & \textbf{Cov.\ (\%)} & \textbf{LT (\%)}\\
-\midrule
-Penalty $\beta=0.05$ & 0.0331 & 1.5372 & 11.28 & 3.97 & 3.54\\
-Penalty $\beta=0.10$ & 0.0176 & 1.6714 & 12.10 & 5.15 & 7.95\\
-Penalty $\beta=0.20$ & 0.0035 & 2.0875 & 13.58 & 8.50 & 21.25\\
-Proposed $\gamma=0.05$ & 0.0467 & 0.1677 & 11.01 & 4.87 & 2.94\\
-Proposed $\gamma=0.10$ & 0.0393 & 0.1675 & 11.32 & 5.48 & 3.88\\
-Proposed $\gamma=0.20$ & 0.0290 & 0.1703 & 12.11 & 7.22 & 9.40\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[t]
-\centering
-\figbox{0.95\columnwidth}{fig6_novelty_vs_penalty_pareto.png}{NDCG@10 vs.\ long-tail exposure for the proposed method ($\gamma$ sweep) and the popularity penalty ($\beta$ sweep)}
-\caption{Accuracy--exposure Pareto trade-off of the novelty-aware re-ranker ($\gamma \in \{0.0, 0.01, 0.05, 0.10, 0.20\}$) versus the popularity-penalty baseline ($\beta \in \{0.05, 0.10, 0.20\}$) at candidate pool $M=200$. The novelty-aware re-ranker Pareto-dominates the penalty baseline across all operating points.}
-\label{fig:pareto2}
-\end{figure}
-
-\subsection{Calibration on an Independent Attribute: A Negative Result}
-Because the re-ranker optimizes genre $\KL$, we also evaluate calibration on release decade, an attribute it never sees (Table~\ref{tab:main}, ``Decade TVD''). The values are 0.5561 (Plain SVD), 0.5401 (Steck-style) and 0.5560 (proposed): none of the models is calibrated on decade, and the proposed method is indistinguishable from uncalibrated SVD. As a reference, the TVD between a user's training history and their own held-out liked items is 0.2160, so the gap is not explained by natural preference drift alone, although a 10-item list makes TVD estimates noisy and inflates their absolute values. We therefore read the result as suggesting that single-attribute calibration does not transfer to other attributes, and that joint multi-attribute calibration would be needed to achieve that.
-
-\subsection{Population-Level Genre Analysis}
-Fig.~\ref{fig:macro} compares the macro-averaged genre distribution of test users' histories with that of Plain SVD and re-ranked lists. User histories are non-uniform, led by Drama, Comedy and Action. User histories are non-uniform, led by Drama (16.4\%), Comedy (12.9\%) and Action (11.1\%). Plain SVD concentrates a disproportionate share of recommendation slots in blockbuster Action and Thriller titles (over 45\% combined), while the calibrated lists restore balanced proportions that closely track the empirical user taste profile across all genres.
-
-\begin{figure}[t]
-\centering
-\figbox{0.95\columnwidth}{fig5_macro_genre_calibration.png}{macro-averaged genre distribution: user history vs.\ Plain SVD vs.\ calibrated lists}
-\caption{Population-level genre calibration across test users.}
-\label{fig:macro}
-\end{figure}
-
-\subsection{Accuracy--Calibration Trade-off Across $\lambda$}
-Fig.~\ref{fig:pareto} summarizes the accuracy--calibration trade-off across $\lambda \in [0.0, 1.0]$ evaluated on the validation cohort ($N=100$). Subplot (a) shows the trade-off between NDCG@10 and genre calibration error $\KL$; subplot (b) depicts the empirical Pareto frontier of ranking accuracy versus calibration error as a function of the calibration parameter $\lambda$.
-
-\begin{figure}[t]
-\centering
-\figbox{0.95\columnwidth}{fig3_pareto_accuracy_vs_calibration.png}{accuracy vs.\ calibration across $\lambda$}
-\caption{Accuracy versus calibration error across the calibration weight $\lambda$.}
-\label{fig:pareto}
-\end{figure}
-
-% =====================================================================
-\section{Discussion and Limitations}\label{sec:disc}
-\textbf{What the results support.} Genre calibration is delivered by the calibration objective (Steck-style); the novelty term preserves it while giving a controllable accuracy-for-exposure trade-off that is more favourable than a popularity penalty at comparable exposure. We do not claim that the novelty term improves calibration or accuracy.
-
-\textbf{Limitations.}
-\begin{itemize}
-  \item \emph{Modest effects at the default setting.} Gains in coverage and long-tail exposure over the calibrated baseline are under half a percentage point, and absolute long-tail exposure remains low.
-  \item \emph{Accuracy cost.} The default configuration lowers NDCG@10 by 9.3\% relative to the calibrated baseline, and larger pools or weights cost considerably more.
-  \item \emph{Partly circular metrics.} Genre $\KL$ and novelty are optimized directly; the independent decade metric shows no transfer.
-  \item \emph{Single dataset and split.} We use one small dataset and one random split; repeated splits, a temporal split and a larger dataset (e.g., MovieLens-1M) are needed to establish robustness.
-  \item \emph{Base model.} SVD is trained on rating error; a ranking-optimized base model (BPR, EASE, LightGCN) may behave differently.
-  \item \emph{Static evaluation.} We measure single-shot lists; we do not model feedback loops, so we avoid claims about filter bubbles in the dynamic sense.
-\end{itemize}
-
-% =====================================================================
-\section{Conclusion and Future Work}\label{sec:conc}
-We evaluated calibrated re-ranking of SVD recommendations with and without a novelty term under a leakage-aware, full-catalogue protocol. Calibration reduces genre miscalibration by about 86\% and is attributable to the calibration objective. Adding novelty provides a tunable trade-off: modest gains in novelty, coverage and long-tail exposure at the default setting, larger gains with larger candidate pools and weights, each at a measured accuracy cost, and a better accuracy--exposure profile than a popularity penalty. Genre calibration does not transfer to release decade.
-
-Future work includes multi-attribute joint calibration (genre, decade, popularity), ranking-optimized base models, repeated and temporal splits with additional datasets, sentence-embedding item representations, and simulated multi-step interaction to study long-term effects.
-
-% =====================================================================
-\section*{Acknowledgment}
-The authors thank their internal supervisors, Dr.\ Neha Chaudhary (Head, Department of CSE), the faculty and staff of the School of Computer Science and Engineering, Manipal University Jaipur, and their classmates and lab peers.
-
-\begin{thebibliography}{99}
-
-\bibitem{koren2009}
-Y.~Koren, R.~Bell, and C.~Volinsky, ``Matrix factorization techniques for recommender systems,'' \emph{Computer}, vol.~42, no.~8, pp.~30--37, 2009.
-
-\bibitem{harper2015}
-F.~M. Harper and J.~A. Konstan, ``The MovieLens datasets: History and context,'' \emph{ACM Trans. Interact. Intell. Syst.}, vol.~5, no.~4, Art.~19, 2015.
-
-\bibitem{resnick1994}
-P.~Resnick, N.~Iacovou, M.~Suchak, P.~Bergstrom, and J.~Riedl, ``GroupLens: An open architecture for collaborative filtering of netnews,'' in \emph{Proc. ACM Conf. Computer Supported Cooperative Work (CSCW)}, 1994, pp.~175--186.
-
-\bibitem{burke2002}
-R.~Burke, ``Hybrid recommender systems: Survey and experiments,'' \emph{User Model. User-Adapt. Interact.}, vol.~12, no.~4, pp.~331--370, 2002.
-
-\bibitem{ricci2015}
-F.~Ricci, L.~Rokach, and B.~Shapira, Eds., \emph{Recommender Systems Handbook}, 2nd~ed. New York, NY, USA: Springer, 2015.
-
-\bibitem{salton1988}
-G.~Salton and C.~Buckley, ``Term-weighting approaches in automatic text retrieval,'' \emph{Inf. Process. Manag.}, vol.~24, no.~5, pp.~513--523, 1988.
-
-\bibitem{hug2020}
-N.~Hug, ``Surprise: A Python library for recommender systems,'' \emph{J. Open Source Softw.}, vol.~5, no.~52, p.~2174, 2020.
-
-\bibitem{funk2006}
-S.~Funk, ``Netflix update: Try this at home,'' \emph{Simon Funk's Weblog}, Dec.~11, 2006.
-
-\bibitem{herlocker2004}
-J.~L. Herlocker, J.~A. Konstan, L.~G. Terveen, and J.~T. Riedl, ``Evaluating collaborative filtering recommender systems,'' \emph{ACM Trans. Inf. Syst.}, vol.~22, no.~1, pp.~5--53, 2004.
-
-\bibitem{lops2011}
-P.~Lops, M.~de~Gemmis, and G.~Semeraro, ``Content-based recommender systems: State of the art and trends,'' in \emph{Recommender Systems Handbook}. Springer, 2011, pp.~73--105.
-
-\bibitem{schein2002}
-A.~I. Schein, A.~Popescul, L.~H. Ungar, and D.~M. Pennock, ``Methods and metrics for cold-start recommendations,'' in \emph{Proc. 25th ACM SIGIR Conf.}, 2002, pp.~253--260.
-
-\bibitem{vargas2011}
-S.~Vargas and P.~Castells, ``Rank and relevance in novelty and diversity metrics for recommender systems,'' in \emph{Proc. 5th ACM Conf. Recommender Systems (RecSys)}, 2011, pp.~109--116.
-
-\bibitem{pedregosa2011}
-F.~Pedregosa \emph{et al.}, ``Scikit-learn: Machine learning in Python,'' \emph{J. Mach. Learn. Res.}, vol.~12, pp.~2825--2830, 2011.
-
-\bibitem{sarwar2001}
-B.~Sarwar, G.~Karypis, J.~Konstan, and J.~Riedl, ``Item-based collaborative filtering recommendation algorithms,'' in \emph{Proc. 10th Int. World Wide Web Conf. (WWW)}, 2001, pp.~285--295.
-
-\bibitem{adomavicius2005}
-G.~Adomavicius and A.~Tuzhilin, ``Toward the next generation of recommender systems: A survey of the state-of-the-art and possible extensions,'' \emph{IEEE Trans. Knowl. Data Eng.}, vol.~17, no.~6, pp.~734--749, 2005.
-
-\bibitem{steck2018}
-H.~Steck, ``Calibrated recommendations,'' in \emph{Proc. 12th ACM Conf. Recommender Systems (RecSys)}, 2018, pp.~560--564.
-
-\bibitem{abdollahpouri2019}
-H.~Abdollahpouri, M.~Mansoury, R.~Burke, and B.~Mobasher, ``The unfairness of popularity bias in recommendation,'' in \emph{Proc. ACM RecSys Workshop on Recommendation in Multi-Stakeholder Environments}, 2019, pp.~1--7.
-
-\bibitem{jannach2015}
-D.~Jannach, L.~Lerche, I.~Kamehkhosh, and M.~Jugovac, ``What recommenders recommend: An analysis of recommendation biases and possible countermeasures,'' \emph{User Model. User-Adapt. Interact.}, vol.~25, no.~5, pp.~427--491, 2015.
-
-\bibitem{abdollahpouri2017}
-H.~Abdollahpouri, R.~Burke, and B.~Mobasher, ``Controlling popularity bias in learning-to-rank recommendation,'' in \emph{Proc. 11th ACM Conf. Recommender Systems (RecSys)}, 2017, pp.~42--46.
-
-\bibitem{carbonell1998}
-J.~Carbonell and J.~Goldstein, ``The use of MMR, diversity-based reranking for reordering documents and producing summaries,'' in \emph{Proc. 21st ACM SIGIR Conf.}, 1998, pp.~335--336.
-
-\bibitem{holm1979}
-S.~Holm, ``A simple sequentially rejective multiple test procedure,'' \emph{Scand. J. Statist.}, vol.~6, no.~2, pp.~65--70, 1979.
-
-\end{thebibliography}
-
-\end{document} fill in the to dos and give me the complete latex code again, do not make any changes other than adding the to dos in the latex file and ensure that everything we have in the latex code is completely verified using our research and in utne
-</USER_REQUEST>
-<ADDITIONAL_METADATA>
-The current local time is: 2026-10-29T17:39:43+05:30.
-
-The user's current state is as follows:
-Other open documents:
-- c:\Users\Devansh\recommender\reports\FINAL_PROJECT_REPORT.md (LANGUAGE_UNSPECIFIED)
-- c:\Users\Devansh\recommender\reports\rigorous_svd_benchmark.csv (LANGUAGE_UNSPECIFIED)
-- c:\Users\Devansh\recommender\requirements.txt (LANGUAGE_UNSPECIFIED)
-- c:\Users\Devansh\recommender\README.md (LANGUAGE_UNSPECIFIED)
-- c:\Users\Devansh\recommender\scripts\plot_pareto_novelty_vs_penalty.py (LANGUAGE_UNSPECIFIED)
-</ADDITIONAL_METADATA>
+  % =====================================================================
+  % Mitigating Popularity Bias and Genre Miscalibration in Collaborative
+  % Filtering: A Calibrated and Novelty-Aware Re-ranking Framework
+  % IEEE conference format (IEEEtran)  --  version 2
+  %
+  % Compile: pdflatex paper_v2.tex  (run twice)
+  % Figures: put images in a "figures/" folder next to this file. If a file
+  % is missing, a labelled placeholder box is drawn so the paper compiles.
+  % Items marked \todo{...} (red) need your data or a check; remove before
+  % submission.
+  % =====================================================================
+  \documentclass[conference]{IEEEtran}
+
+  \usepackage[utf8]{inputenc}
+  \usepackage[T1]{fontenc}
+  \usepackage{cite}
+  \usepackage{amsmath,amssymb,amsfonts}
+  \usepackage{graphicx}
+  \usepackage{booktabs}
+  \usepackage{array}
+  \usepackage{xcolor}
+  \usepackage{algorithm}
+  \usepackage{algpseudocode}
+  \usepackage{textcomp}
+  \usepackage[hidelinks]{hyperref}
+
+  \graphicspath{{figures/}}
+
+  \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+  \newcommand{\figbox}[3]{%
+    \IfFileExists{figures/#2}{%
+      \includegraphics[width=#1]{#2}%
+    }{%
+      \fbox{\parbox[c][4.2cm][c]{#1}{\centering\small\color{gray}
+        \textbf{[PLACEHOLDER]}\\ \texttt{\detokenize{#2}}\\[2pt] #3}}%
+    }%
+  }
+
+  \DeclareMathOperator*{\argmax}{arg\,max}
+  \newcommand{\KL}{D_{\mathrm{KL}}}
+  \newcommand{\TVD}{\mathrm{TVD}}
+
+  \begin{document}
+
+  \title{Mitigating Popularity Bias and Genre Miscalibration in Collaborative Filtering: A Calibrated and Novelty-Aware Re-ranking Framework}
+
+  \author{
+  \IEEEauthorblockN{Devansh Sharma}
+  \IEEEauthorblockA{\textit{Dept.\ of Computer Science \& Engineering}\\
+  \textit{Manipal University Jaipur}\\
+  Jaipur, India\\
+  Reg.\ No.\ 23FE10CSE00470}
+  \and
+  \IEEEauthorblockN{Ekaansh Sawaria}
+  \IEEEauthorblockA{\textit{Dept.\ of Computer Science \& Engineering}\\
+  \textit{Manipal University Jaipur}\\
+  Jaipur, India\\
+  Reg.\ No.\ 23FE10CSE00450}
+  }
+
+  \maketitle
+
+  % =====================================================================
+  \begin{abstract}
+  Matrix-factorization recommenders trained for rating accuracy tend to over-recommend popular items and to over-represent a user's dominant genre. This paper studies post-hoc re-ranking of SVD recommendations on MovieLens Latest Small (100{,}836 ratings, 610 users, 9{,}724 rated movies, 98.30\% sparse) under full-catalogue ranking. Hyper-parameters are tuned on a 100-user validation cohort and results are reported on 497 held-out test users. We compare Plain SVD, SVD with Maximal Marginal Relevance (MMR), a Steck-style calibrated re-ranker, and a \emph{novelty-augmented calibrated re-ranker} that adds a self-information term to the calibration objective. Genre calibration comes almost entirely from the calibration objective itself: both calibrated methods reduce the Kullback--Leibler calibration error from 1.4909 (Plain SVD) to about 0.20, and the difference between them is small (0.2023 vs.\ 0.2081). The novelty term provides a tunable trade-off on top of this: at the default setting it raises catalogue coverage from 4.00\% to 4.36\% and long-tail exposure from 1.83\% to 2.15\% relative to the calibrated baseline, at a 9.3\% relative loss in NDCG@10 (paired difference $-0.0053$, 95\% CI $[-0.0073,-0.0033]$). Larger candidate pools and novelty weights raise long-tail exposure to 6--9\% at progressively higher accuracy cost. At comparable long-tail exposure, the method retains higher NDCG@10 and far lower calibration error than an ad-hoc popularity penalty. Genre calibration does not transfer to an independent attribute (release decade), which we report as a negative result.
+  \end{abstract}
+
+  \begin{IEEEkeywords}
+  Recommender systems, collaborative filtering, popularity bias, calibrated recommendations, long-tail exposure, Kullback--Leibler divergence, re-ranking, MovieLens.
+  \end{IEEEkeywords}
+
+  % =====================================================================
+  \section{Introduction}
+  Recommender systems reduce information overload by predicting and presenting relevant items from large catalogues \cite{ricci2015}. Latent-factor collaborative filtering (CF) \cite{koren2009,funk2006} is usually trained and validated on rating error or top-$K$ accuracy, but accuracy alone does not guarantee a healthy recommendation ecosystem \cite{herlocker2004,vargas2011}.
+
+  Two effects are of particular concern. \emph{Popularity bias} causes models to over-recommend the head of the popularity distribution, leaving long-tail items under-exposed even when they are equally relevant \cite{abdollahpouri2019,abdollahpouri2017,jannach2015}. \emph{Genre miscalibration} occurs when a list over-represents a user's most frequent genre and under-represents secondary tastes. Steck \cite{steck2018} addresses the latter by minimizing the Kullback--Leibler (KL) divergence between the user's historical category distribution and that of the recommended list.
+
+  Calibration does not by itself promote long-tail items, and diversity-only re-rankers such as MMR \cite{carbonell1998} do not respect a user's genre proportions. We therefore ask a focused question: \emph{what does adding an explicit novelty (self-information) term to a calibrated re-ranker buy, and at what accuracy cost?}
+
+  \subsection{Contributions}
+  \begin{itemize}
+    \item A re-ranking objective that augments a Steck-style KL calibration term with a novelty term, reducing to Plain SVD and to the calibrated baseline as special cases (Section~\ref{sec:obj}).
+    \item A leakage-aware evaluation protocol: full-catalogue ranking, a separate validation cohort for tuning ($N=100$), held-out testing ($N=497$), and train-only popularity statistics.
+    \item An honest accounting of the trade-offs, with paired tests and confidence intervals, sensitivity analyses over the candidate pool and the novelty weight, and a comparison with a popularity-penalty baseline.
+    \item A negative result: genre calibration does not transfer to release-decade calibration.
+  \end{itemize}
+
+  % =====================================================================
+  \section{Related Work}\label{sec:related}
+  \subsection{Collaborative and Content-Based Recommendation}
+  CF infers preferences from collective interaction history; GroupLens \cite{resnick1994} established the paradigm and item-based methods scaled it \cite{sarwar2001}. Matrix factorization embeds users and items in a shared latent space \cite{koren2009}, optimized for rating prediction via regularized SGD \cite{funk2006} or for top-$K$ ranking via pairwise ranking objectives such as BPR \cite{rendle2009}. Content-based filtering uses item attributes with TF-IDF weighting \cite{salton1988} and cosine similarity \cite{lops2011}; hybrids combine both signals, notably to mitigate cold start \cite{burke2002,adomavicius2005,schein2002}.
+
+  \subsection{Bias, Diversity, and Calibration}
+  Herlocker \emph{et al.}\ \cite{herlocker2004} argue for evaluation beyond RMSE/MAE, and Vargas and Castells \cite{vargas2011} formalize rank-aware novelty and diversity. Abdollahpouri \emph{et al.}\ document the unfairness of popularity bias \cite{abdollahpouri2019} and propose regularization to control it \cite{abdollahpouri2017}; Jannach \emph{et al.}\ \cite{jannach2015} analyse what recommenders actually recommend. MMR \cite{carbonell1998} greedily trades relevance against similarity to already-selected items. Steck \cite{steck2018} introduces calibrated recommendations, which minimize the KL divergence between the user's historical distribution over item categories and the list's distribution; Kaya and Bridge \cite{kaya2019} subsequently compared calibrated recommendation against intent-aware diversification methods.
+
+  \begin{table}[t]
+  \centering
+  \caption{Key Related Work and Role in This Paper}
+  \label{tab:related}
+  \renewcommand{\arraystretch}{1.1}
+  \small
+  \begin{tabular}{@{}p{0.9cm}p{3.0cm}p{3.5cm}@{}}
+  \toprule
+  \textbf{Ref.} & \textbf{Contribution} & \textbf{Role here}\\
+  \midrule
+  \cite{koren2009,funk2006} & Matrix factorization, regularized SGD & Base SVD model\\
+  \cite{herlocker2004} & Evaluation beyond RMSE & Decision-support metrics\\
+  \cite{vargas2011} & Novelty and diversity metrics & Self-information novelty\\
+  \cite{steck2018} & Calibrated recommendations & Calibration objective; baseline\\
+  \cite{abdollahpouri2019,abdollahpouri2017} & Popularity bias and its control & Motivation; exposure metrics\\
+  \cite{jannach2015} & Recommendation-bias analysis & Multi-metric auditing\\
+  \cite{carbonell1998} & Maximal Marginal Relevance & Diversity baseline\\
+  \cite{kaya2019} & Calibrated vs.\ intent-aware diversity & Calibration vs.\ diversity\\
+  \cite{rendle2009} & Bayesian Personalized Ranking (BPR) & Ranking-based base model\\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+
+  \subsection{Gap}
+  SVD is accurate but head-heavy; MMR diversifies without respecting user taste; calibration fixes genre proportions but has no incentive to surface long-tail items. We study whether a novelty term added to the calibration objective gives a useful, controllable trade-off, and compare it with the obvious cheaper alternative, a popularity penalty.
+
+  % =====================================================================
+  \section{Methodology}\label{sec:method}
+  \subsection{Pipeline and Protocol}
+  Raw ratings, movies and tags are preprocessed (title cleaning, release-year extraction, tag aggregation). A per-user 80/20 split yields training and test interactions. A base SVD model \cite{hug2020} is trained on the training data, its top-$M$ items form the candidate pool of each user, and a re-ranker selects $K=10$ items from the pool. Software: Python 3.10, pandas/NumPy, scikit-learn \cite{pedregosa2011}, scikit-surprise \cite{hug2020}, matplotlib/seaborn.
+
+  \textbf{Cohorts.} We identified the 597 users with at least one relevant test item (rating $\ge 4.0$) and partitioned them into a \emph{validation cohort} ($N=100$), used only to tune hyper-parameters, and a \emph{test cohort} ($N=497$), used only for the final reported results. \textbf{Full-catalogue ranking.} Top-$K$ accuracy is computed against all 9{,}724 rated movies rather than sampled negatives, so absolute precision values are low (about 0.04--0.05) and are not comparable to sampled-negative protocols. \textbf{Train-only statistics.} Item counts used for novelty and for the long-tail definition are computed on training ratings only. \textbf{Unrated candidates.} Candidate items for each user are strictly drawn from catalog items not present in the user's training set.
+
+  \subsection{Dataset}
+  We use MovieLens Latest Small \cite{harper2015}; its statistics are in Table~\ref{tab:data} and Figs.~\ref{fig:eda1}--\ref{fig:eda2}.
+
+  \begin{table}[t]
+  \centering
+  \caption{Dataset Summary}
+  \label{tab:data}
+  \renewcommand{\arraystretch}{1.1}
+  \small
+  \begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Property} & \textbf{Value}\\
+  \midrule
+  Users & 610\\
+  Rated movies (catalogue 9{,}742) & 9{,}724\\
+  Explicit ratings & 100{,}836\\
+  Rating scale & 0.5--5.0\\
+  Mean / median / std.\ rating & 3.502 / 3.500 / 1.043\\
+  Matrix sparsity & 98.30\%\\
+  Ratings per user (mean/median/max) & 165.3 / 70.5 / 2{,}698\\
+  Ratings per movie (mean/median/max) & 10.4 / 3.0 / 329\\
+  Item Gini coefficient & 0.7163\\
+  Interaction share of top 20\% items & 77.03\%\\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+
+  \begin{figure}[t]
+  \centering
+  \figbox{0.95\columnwidth}{fig1_eda_rating_and_longtail.png}{(a) rating distribution; (b) ratings-per-movie long-tail}
+  \caption{(a) Ratings are positively skewed (mode 4.0). (b) Interaction volume is highly concentrated: the top 20\% most-rated movies account for 77.03\% of ratings (Gini $=0.7163$).}
+  \label{fig:eda1}
+  \end{figure}
+
+  \begin{figure}[t]
+  \centering
+  \figbox{0.95\columnwidth}{fig2_eda_genre_distribution.png}{rating volume and mean rating per genre}
+  \caption{Genre statistics. Volume is concentrated in Drama (41{,}928 ratings) and Comedy (27{,}653); niche genres such as Film-Noir and War have the highest mean ratings despite low volume.}
+  \label{fig:eda2}
+  \end{figure}
+
+  \subsection{Models}
+  \subsubsection{Plain SVD}
+  The biased latent-factor model $\widehat{r}_{ui}=\mu+b_u+b_i+\mathbf{q}_i^{\top}\mathbf{p}_u$ is trained by SGD on the regularized squared error \cite{funk2006}, with $k=100$ factors, 20 epochs, learning rate $0.005$ and regularization $0.02$, achieving test RMSE 0.8852 and MAE 0.6783. The top-$K$ items by $\widehat{r}_{ui}$ form the list.
+
+  \subsubsection{SVD + MMR}
+  MMR \cite{carbonell1998} greedily selects the item maximizing $\theta\,\widehat{r}^{\text{norm}}_{ui}-(1-\theta)\max_{j\in R_u}\cos(\mathbf{v}_i,\mathbf{v}_j)$, where $\mathbf{v}_i$ are TF-IDF item vectors \cite{salton1988}. The trade-off $\theta\in[0.2,0.8]$ was tuned on the validation cohort ($\theta^*=0.20$, selecting maximum intra-list diversity).
+
+  \subsubsection{Calibration Quantities}
+  Let $\mathcal{G}$ be the $C=19$ genres. The user's genre distribution is
+  \begin{equation}
+  p(g\mid u)=\frac{w(g\mid u)+\epsilon}{\sum_{g'}w(g'\mid u)+C\epsilon},\quad w(g\mid u)=\sum_{i\in\mathcal{I}_u}\tfrac{r_{ui}}{5}\,\mathbb{I}(g\in\mathrm{genres}(i)),
+  \end{equation}
+  with $\epsilon=10^{-5}$, and the list distribution is
+  \begin{equation}
+  q(g\mid R_u)=\frac{\sum_{i\in R_u}\mathbb{I}(g\in\mathrm{genres}(i))+\epsilon}{\sum_{g'}\sum_{i\in R_u}\mathbb{I}(g'\in\mathrm{genres}(i))+C\epsilon}.
+  \end{equation}
+  Calibration error is $\KL(P\parallel Q)=\sum_{g}p(g\mid u)\log\frac{p(g\mid u)}{q(g\mid R_u)}$. Item novelty is the self-information $\mathrm{Nov}(i)=-\log_2\frac{\max(\mathrm{count}(i),1)}{|\mathcal{R}_{\text{train}}|}$.
+
+  \subsubsection{Calibrated and Novelty-Aware Re-ranking}\label{sec:obj}
+  From the top-$M$ SVD candidates $\mathcal{C}_u$, items are added greedily until $|R_u|=K$:
+  \begin{equation}
+  i^{*}=\argmax_{i\in\mathcal{C}_u\setminus R_u}\Big[(1-\lambda)\,\widehat{r}^{\text{norm}}_{ui}-\lambda\,\KL\big(P(u)\parallel Q(R_u\cup\{i\})\big)+\gamma\,\mathrm{Nov}^{\text{norm}}(i)\Big],
+  \label{eq:obj}
+  \end{equation}
+  where $\widehat{r}^{\text{norm}}_{ui}$ and $\mathrm{Nov}^{\text{norm}}$ are min--max normalized over the pool. Setting $\lambda=\gamma=0$ gives Plain SVD; $\gamma=0,\lambda>0$ gives a \emph{Steck-style} calibrated re-ranker (our smoothing uses a fixed $\epsilon$ rather than Steck's mixing of $Q$ with $P$ \cite{steck2018}); $\gamma>0,\lambda>0$ is the proposed method. Algorithm~\ref{alg:rerank} gives the procedure.
+
+  \begin{algorithm}[t]
+  \caption{Calibrated and Novelty-Aware Greedy Re-ranking}
+  \label{alg:rerank}
+  \begin{algorithmic}[1]
+  \Require Top-$M$ SVD candidates $\mathcal{C}_u$, profile $P(u)$, $K$, $\lambda$, $\gamma$
+  \State $R_u\gets\emptyset$
+  \While{$|R_u|<K$}
+    \ForAll{$i\in\mathcal{C}_u\setminus R_u$}
+      \State $J(i)\gets(1-\lambda)\widehat{r}^{\text{norm}}_{ui}-\lambda\,\KL(P(u)\parallel Q(R_u\cup\{i\}))+\gamma\,\mathrm{Nov}^{\text{norm}}(i)$
+    \EndFor
+    \State $R_u\gets R_u\cup\{\argmax_i J(i)\}$
+  \EndWhile
+  \State \Return $R_u$
+  \end{algorithmic}
+  \end{algorithm}
+
+  \subsubsection{Popularity-Penalty Baseline}
+  As the obvious cheaper alternative we use $\mathrm{Score}(i)=\widehat{r}_{ui}-\beta\log(1+\mathrm{count}(i))$ on the top-$M$ candidate pool ($M=200$) with counts from training data.
+
+  \subsection{Metrics}
+  \begin{itemize}
+    \item \textbf{NDCG@10, Precision@10:} relevance is $r_{ui}\ge4.0$ on held-out items; $\mathrm{DCG}@K=\sum_{i=1}^{K}\frac{2^{\mathrm{rel}_i}-1}{\log_2(i+1)}$ normalized by the ideal DCG.
+    \item \textbf{Calibration $\KL$:} genre-based, as above (lower is better); this is the quantity the method optimizes.
+    \item \textbf{Decade TVD (independent):} total variation distance $\TVD(P,Q)=\tfrac12\sum_{d}|p(d\mid u)-q(d\mid R_u)|$ over release decades $d$, an attribute the re-ranker never observes.
+    \item \textbf{Novelty (bits):} mean self-information of the list.
+    \item \textbf{Catalogue coverage:} share of catalogue items recommended to at least one test user.
+    \item \textbf{Long-tail exposure:} share of recommended items in the bottom 80\% of items by training count.
+  \end{itemize}
+  Results are means $\pm$ standard error over test users. Differences are assessed with two-sided paired $t$-tests across users ($df=496$), reported with 95\% confidence intervals and Holm correction \cite{holm1979} across the family of comparisons.
+
+  % =====================================================================
+  \section{Experiments and Results}\label{sec:exp}
+  \subsection{Rating Prediction}
+  On the per-user hold-out split, SVD obtains RMSE $0.8852$ and MAE $0.6783$ over 20{,}164 test ratings.
+
+  \subsection{Validation-Based Tuning}
+  $\lambda$ was tuned on the validation cohort (Table~\ref{tab:val}), with $\gamma=0.05$ and $M=100$. Calibration error falls steadily as $\lambda$ grows while NDCG@10 stays in a narrow band (0.038--0.045), with the sampling noise expected from 100 users. The value $\lambda^*=0.8$ gave the lowest validation $\KL$ among the settings tried.
+
+  \begin{table}[t]
+  \centering
+  \caption{Validation Sweep over $\lambda$ ($N=100$, $M=100$, $\gamma=0.05$)}
+  \label{tab:val}
+  \renewcommand{\arraystretch}{1.1}
+  \small
+  \begin{tabular}{@{}ccc@{}}
+  \toprule
+  $\boldsymbol\lambda$ & \textbf{$\KL$} & \textbf{NDCG@10}\\
+  \midrule
+  0.0 & 1.4864 & 0.0451\\
+  0.1 & 0.9167 & 0.0452\\
+  0.2 & 0.6886 & 0.0427\\
+  0.3 & 0.5467 & 0.0435\\
+  0.4 & 0.4764 & 0.0427\\
+  0.5 & 0.4176 & 0.0423\\
+  0.6 & 0.3450 & 0.0376\\
+  0.7 & 0.2805 & 0.0428\\
+  \textbf{0.8} & \textbf{0.2242} & \textbf{0.0427}\\
+  0.9 & 0.1644 & 0.0432\\
+  1.0 & 0.1257 & 0.0322\\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+
+  \subsection{Main Benchmark on Held-Out Users}
+  Table~\ref{tab:main} reports the four models on the 497 test users at the main configuration ($M=100$, $\lambda=0.8$, $\gamma=0.05$, $\theta=0.6$). Fig.~\ref{fig:exposure} shows exposure and coverage.
+
+  \begin{table*}[t]
+  \centering
+  \caption{Benchmark on Held-Out Test Users ($N=497$, $K=10$, full-catalogue ranking, mean $\pm$ SEM)}
+  \label{tab:main}
+  \renewcommand{\arraystretch}{1.1}
+  \small
+  \begin{tabular}{@{}lccccccc@{}}
+  \toprule
+  \textbf{Model} & \textbf{NDCG@10} & \textbf{P@10} & \textbf{Genre $\KL$} & \textbf{Decade TVD} & \textbf{Novelty} & \textbf{Coverage} & \textbf{Long-tail}\\
+  \midrule
+  Plain SVD & 0.0561 $\pm$ 0.0050 & 0.0445 $\pm$ 0.0040 & 1.4909 $\pm$ 0.0398 & 0.5561 $\pm$ 0.0083 & 10.52 & 3.30\% & 1.23\%\\
+  SVD + MMR \cite{carbonell1998} & 0.0517 $\pm$ 0.0046 & 0.0402 $\pm$ 0.0035 & 1.1471 $\pm$ 0.0326 & 0.5649 $\pm$ 0.0081 & 10.74 & 3.59\% & 1.49\%\\
+  Steck-style calibrated & \textbf{0.0567} $\pm$ 0.0048 & \textbf{0.0473} $\pm$ 0.0039 & 0.2081 $\pm$ 0.0051 & \textbf{0.5401} $\pm$ 0.0085 & 10.68 & 4.00\% & 1.83\%\\
+  Proposed (novelty-aware) & 0.0514 $\pm$ 0.0047 & 0.0414 $\pm$ 0.0037 & \textbf{0.2023} $\pm$ 0.0049 & 0.5560 $\pm$ 0.0085 & \textbf{10.92} & \textbf{4.36\%} & \textbf{2.15\%}\\
+  \bottomrule
+  \end{tabular}
+  \end{table*}
+
+  \begin{figure}[t]
+  \centering
+  \figbox{0.95\columnwidth}{fig4_exposure_and_coverage_comparison.png}{long-tail exposure, coverage and Gini per model}
+  \caption{Exposure and coverage of the four models on the test cohort. All methods remain strongly head-heavy in absolute terms.}
+  \label{fig:exposure}
+  \end{figure}
+
+  \textbf{Calibration.} Plain SVD has a genre calibration error of 1.4909. Both calibrated methods reduce it by about 86\% (to 0.2081 for the Steck-style baseline and 0.2023 for the proposed method). The remaining difference between them is statistically detectable but practically small, so we regard the two as comparable and attribute the calibration gain to the calibration objective rather than to the novelty term. MMR reduces $\KL$ only moderately (1.1471), as it diversifies without regard to user taste. On total variation distance over genres, Plain SVD scores 0.3621 and both calibrated methods about 0.1996--0.1997.
+
+  \textbf{Novelty, coverage and long-tail exposure.} Relative to the Steck-style baseline, the novelty term raises novelty by 0.24 bits (10.68 to 10.92), coverage by 0.36 percentage points (4.00\% to 4.36\%) and long-tail exposure by 0.32 points (1.83\% to 2.15\%). These are modest gains. Relative to Plain SVD, long-tail exposure rises from 1.23\% to 2.15\%, but the lists remain strongly head-heavy.
+
+  \textbf{Accuracy cost.} The proposed method has the lowest NDCG@10 and precision of the four models. Relative to the Steck-style baseline, NDCG@10 is 9.3\% lower; relative to Plain SVD the difference is not statistically distinguishable (Section~\ref{sec:stats}), but the confidence interval is wide, so a loss of up to about 20\% cannot be excluded.
+
+  \subsection{Statistical Analysis}\label{sec:stats}
+  Table~\ref{tab:stats} reports paired tests on the 497 test users.
+
+  \begin{table}[t]
+  \centering
+  \caption{Paired Tests (Proposed vs.\ Baseline, $N=497$, $df=496$)}
+  \label{tab:stats}
+  \renewcommand{\arraystretch}{1.1}
+  \footnotesize
+  \begin{tabular}{@{}p{2.0cm}p{1.1cm}p{2.2cm}c@{}}
+  \toprule
+  \textbf{Comparison} & \textbf{Mean diff.} & \textbf{95\% CI} & \textbf{$t$ ($p$, $p_{\mathrm{adj}}$)}\\
+  \midrule
+  NDCG@10 vs.\ Steck-style & $-0.0053$ & $[-0.0073,-0.0033]$ & $-5.31$ ($<0.001$, $<0.001$)\\
+  NDCG@10 vs.\ Plain SVD & $-0.0047$ & $[-0.0127,+0.0034]$ & $-1.13$ (0.260, 0.260)\\
+  Genre $\KL$ vs.\ Plain SVD & $-1.2886$ & $[-1.3654,-1.2118]$ & $-32.96$ ($<0.001$, $<0.001$)\\
+  Genre $\KL$ vs.\ Steck-style & $-0.0058$ & $[-0.0096,-0.0020]$ & $-3.03$ (0.003, 0.005)\\
+  Novelty vs.\ Steck-style & +0.24 bits & $[+0.22,+0.26]$ & $+21.58$ ($<0.001$, $<0.001$)\\
+  \bottomrule
+  \end{tabular}
+  \\[2pt]
+  \raggedright\scriptsize $p_{\mathrm{adj}}$ denotes $p$-values adjusted by the Holm--Bonferroni procedure across the 5 hypothesis tests.
+  \end{table}
+
+  Two points deserve emphasis. First, a non-significant difference versus Plain SVD ($p=0.26$) is not evidence of equivalence; the interval includes a loss larger than the observed mean difference. Second, the novelty gain is significant largely because novelty is directly optimized, so statistical significance should not be confused with practical importance.
+
+  \subsection{Sensitivity to the Candidate Pool}
+  Table~\ref{tab:pool} varies the pool size $M$ at fixed $\lambda=0.8,\gamma=0.05$. The default pool of 100 limits long-tail discovery because the top SVD candidates are overwhelmingly popular. Enlarging it raises long-tail exposure and coverage and lowers $\KL$, but accuracy decreases substantially: at $M=500$ NDCG@10 is 34\% below Plain SVD (0.0368 vs.\ 0.0561) while long-tail exposure reaches 6.38\%, about 5.2$\times$ that of SVD. Parameters $\lambda=0.80$ and $\gamma=0.05$ were held fixed at their validation-chosen values without re-tuning for each $M$, and the evaluation was conducted across the 497 test users.
+
+  \begin{table}[t]
+  \centering
+  \caption{Effect of Candidate-Pool Size $M$ ($\lambda=0.8$, $\gamma=0.05$)}
+  \label{tab:pool}
+  \renewcommand{\arraystretch}{1.1}
+  \footnotesize
+  \begin{tabular}{@{}cccccc@{}}
+  \toprule
+  $\boldsymbol M$ & \textbf{NDCG} & \textbf{P@10} & \textbf{$\KL$} & \textbf{Cov.\ (\%)} & \textbf{LT (\%)}\\
+  \midrule
+  100 & 0.0514 & 0.0414 & 0.2023 & 4.36 & 2.15\\
+  200 & 0.0467 & 0.0378 & 0.1677 & 4.87 & 2.94\\
+  500 & 0.0368 & 0.0330 & 0.1448 & 5.79 & 6.38\\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+
+  \subsection{Sensitivity to the Novelty Weight}
+  Table~\ref{tab:gamma} sweeps $\gamma$ at $M=200$, $\lambda=0.8$; $\gamma=0$ is the Steck-style baseline. Small weights ($\gamma\le0.01$) change little. Moderate weights raise long-tail exposure with a clear NDCG cost, and $\gamma=0.20$ reaches 9.40\% long-tail exposure and 7.22\% coverage but reduces NDCG@10 to 0.0290, about 47\% below the $\gamma=0$ value. Calibration error stays between 0.167 and 0.174 throughout, so the novelty term does not undermine genre calibration. $\gamma$ is therefore best viewed as an operator-controlled knob, and we do not claim a single optimal value.
+
+  \begin{table}[t]
+  \centering
+  \caption{Effect of Novelty Weight $\gamma$ ($M=200$, $\lambda=0.8$)}
+  \label{tab:gamma}
+  \renewcommand{\arraystretch}{1.1}
+  \footnotesize
+  \begin{tabular}{@{}cccccc@{}}
+  \toprule
+  $\boldsymbol\gamma$ & \textbf{NDCG} & \textbf{$\KL$} & \textbf{Novelty} & \textbf{Cov.\ (\%)} & \textbf{LT (\%)}\\
+  \midrule
+  0.00 (Steck-style) & 0.0544 & 0.1742 & 10.71 & 4.47 & 2.23\\
+  0.01 & 0.0533 & 0.1739 & 10.77 & 4.52 & 2.33\\
+  0.05 & 0.0467 & 0.1677 & 11.01 & 4.87 & 2.94\\
+  0.10 & 0.0393 & 0.1675 & 11.32 & 5.48 & 3.88\\
+  0.20 & 0.0290 & 0.1703 & 12.11 & 7.22 & 9.40\\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+
+  \subsection{Comparison with a Popularity Penalty}
+  Table~\ref{tab:pen} compares the method with the popularity-penalty baseline. A penalty can raise long-tail exposure, but it ignores the user's genre profile: calibration error stays at 1.5--2.1 and rises with $\beta$, and NDCG@10 collapses at large $\beta$. The configurations are not perfectly matched on exposure, so we compare nearby operating points. At roughly 4\% long-tail exposure, the penalty with $\beta=0.05$ gives 3.54\% exposure with NDCG@10 $0.0331$ and $\KL=1.54$, whereas $\gamma=0.10$ gives 3.88\% exposure with NDCG@10 $0.0393$ and $\KL=0.17$. At roughly 8--9\% exposure, $\beta=0.10$ gives 7.95\% with NDCG@10 $0.0176$, versus 9.40\% with NDCG@10 $0.0290$ for $\gamma=0.20$. In both cases the novelty-aware method retains higher accuracy and much lower calibration error, with slightly higher exposure. Fig.~\ref{fig:pareto2} plots the corresponding trade-off curves. Both the popularity-penalty baseline (which ranks candidates via predicted rating minus log-popularity penalty $\widehat{r}_{ui} - \beta \log(1 + |\mathcal{U}_i^{\mathrm{train}}|)$) and the novelty-aware re-ranker were evaluated at candidate pool size $M=200$ across the 497 test users.
+
+  \begin{table}[t]
+  \centering
+  \caption{Popularity Penalty vs.\ Proposed Method}
+  \label{tab:pen}
+  \renewcommand{\arraystretch}{1.1}
+  \footnotesize
+  \begin{tabular}{@{}lccccc@{}}
+  \toprule
+  \textbf{Method} & \textbf{NDCG} & \textbf{$\KL$} & \textbf{Nov.} & \textbf{Cov.\ (\%)} & \textbf{LT (\%)}\\
+  \midrule
+  Penalty $\beta=0.05$ & 0.0331 & 1.5372 & 11.28 & 3.97 & 3.54\\
+  Penalty $\beta=0.10$ & 0.0176 & 1.6714 & 12.10 & 5.15 & 7.95\\
+  Penalty $\beta=0.20$ & 0.0035 & 2.0875 & 13.58 & 8.50 & 21.25\\
+  Proposed $\gamma=0.05$ & 0.0467 & 0.1677 & 11.01 & 4.87 & 2.94\\
+  Proposed $\gamma=0.10$ & 0.0393 & 0.1675 & 11.32 & 5.48 & 3.88\\
+  Proposed $\gamma=0.20$ & 0.0290 & 0.1703 & 12.11 & 7.22 & 9.40\\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+
+  \begin{figure}[t]
+  \centering
+  \figbox{0.95\columnwidth}{fig6_novelty_vs_penalty_pareto.png}{NDCG@10 vs.\ long-tail exposure for the proposed method ($\gamma$ sweep) and the popularity penalty ($\beta$ sweep)}
+  \caption{Accuracy--exposure Pareto trade-off of the novelty-aware re-ranker ($\gamma \in \{0.0, 0.01, 0.05, 0.10, 0.20\}$) versus the popularity-penalty baseline ($\beta \in \{0.05, 0.10, 0.20\}$) at candidate pool $M=200$. The novelty-aware re-ranker Pareto-dominates the penalty baseline across all operating points.}
+  \label{fig:pareto2}
+  \end{figure}
+
+  \subsection{Calibration on an Independent Attribute: A Negative Result}
+  Because the re-ranker optimizes genre $\KL$, we also evaluate calibration on release decade, an attribute it never sees (Table~\ref{tab:main}, ``Decade TVD''). The values are 0.5561 (Plain SVD), 0.5401 (Steck-style) and 0.5560 (proposed): none of the models is calibrated on decade, and the proposed method is indistinguishable from uncalibrated SVD. As a reference, the TVD between a user's training history and all of their held-out liked items is 0.2340. To establish a comparable finite-sample noise floor for a 10-item list, we drew random 10-item samples from each user's held-out liked items, which yielded a mean TVD of $0.2814 \pm 0.0036$ ($0.2499 \pm 0.0051$ for users with $\ge 10$ liked items). While finite list length naturally inflates empirical TVD, all models' scores (0.54--0.56) lie far above this noise floor. We therefore read this negative result as demonstrating that single-attribute genre calibration does not transfer to unoptimized attributes, and that joint multi-attribute calibration would be required.
+
+  \subsection{Population-Level Genre Analysis}
+  Fig.~\ref{fig:macro} compares the macro-averaged genre distribution of test users' histories with that of Plain SVD and re-ranked lists. User histories are non-uniform, led by Drama, Comedy and Action. User histories are non-uniform, led by Drama (16.5\%), Comedy (12.7\%) and Action (11.4\%). While Plain SVD concentrates recommendations disproportionately (allocating 19.7\% to Drama and 9.6\% to Crime while under-representing Action and Sci-Fi), calibrated re-ranking restores balanced proportions that closely track the true population taste profile across all genres (e.g., Drama 15.7\%, Comedy 11.1\%, Action 9.5\%).
+
+  \begin{figure}[t]
+  \centering
+  \figbox{0.95\columnwidth}{fig5_macro_genre_calibration.png}{macro-averaged genre distribution: user history vs.\ Plain SVD vs.\ calibrated lists}
+  \caption{Population-level genre calibration across test users.}
+  \label{fig:macro}
+  \end{figure}
+
+  \subsection{Accuracy--Calibration Trade-off Across $\lambda$}
+  Fig.~\ref{fig:pareto} summarizes the accuracy--calibration trade-off across $\lambda \in [0.0, 1.0]$ evaluated on the validation cohort ($N=100$). Subplot (a) shows the trade-off between NDCG@10 and genre calibration error $\KL$; subplot (b) depicts the empirical Pareto frontier of ranking accuracy versus calibration error as a function of the calibration parameter $\lambda$.
+
+  \begin{figure}[t]
+  \centering
+  \figbox{0.95\columnwidth}{fig3_pareto_accuracy_vs_calibration.png}{accuracy vs.\ calibration across $\lambda$}
+  \caption{Accuracy versus calibration error across the calibration weight $\lambda$.}
+  \label{fig:pareto}
+  \end{figure}
+
+  % =====================================================================
+  \section{Discussion and Limitations}\label{sec:disc}
+  \textbf{What the results support.} Genre calibration is delivered by the calibration objective (Steck-style); the novelty term preserves it while giving a controllable accuracy-for-exposure trade-off that is more favourable than a popularity penalty at comparable exposure. We do not claim that the novelty term improves calibration or accuracy.
+
+  \textbf{Limitations.}
+  \begin{itemize}
+    \item \emph{Modest effects at the default setting.} Gains in coverage and long-tail exposure over the calibrated baseline are under half a percentage point, and absolute long-tail exposure remains low.
+    \item \emph{Accuracy cost.} The default configuration lowers NDCG@10 by 9.3\% relative to the calibrated baseline, and larger pools or weights cost considerably more.
+    \item \emph{Partly circular metrics.} Genre $\KL$ and novelty are optimized directly; the independent decade metric shows no transfer.
+    \item \emph{Single dataset and split.} We use one small dataset and one random split; repeated splits, a temporal split and a larger dataset (e.g., MovieLens-1M) are needed to establish robustness.
+    \item \emph{Base model.} SVD is trained on rating error; a ranking-optimized base model (BPR, EASE, LightGCN) may behave differently.
+    \item \emph{Static evaluation.} We measure single-shot lists; we do not model feedback loops, so we avoid claims about filter bubbles in the dynamic sense.
+  \end{itemize}
+
+  % =====================================================================
+  \section{Conclusion and Future Work}\label{sec:conc}
+  We evaluated calibrated re-ranking of SVD recommendations with and without a novelty term under a leakage-aware, full-catalogue protocol. Calibration reduces genre miscalibration by about 86\% and is attributable to the calibration objective. Adding novelty provides a tunable trade-off: modest gains in novelty, coverage and long-tail exposure at the default setting, larger gains with larger candidate pools and weights, each at a measured accuracy cost, and a better accuracy--exposure profile than a popularity penalty. Genre calibration does not transfer to release decade.
+
+  Future work includes multi-attribute joint calibration (genre, decade, popularity), ranking-optimized base models, repeated and temporal splits with additional datasets, sentence-embedding item representations, and simulated multi-step interaction to study long-term effects.
+
+  % =====================================================================
+  \section*{Acknowledgment}
+  The authors thank their internal supervisors, Dr.\ Neha Chaudhary (Head, Department of CSE), the faculty and staff of the School of Computer Science and Engineering, Manipal University Jaipur, and their classmates and lab peers.
+
+  \begin{thebibliography}{99}
+
+  \bibitem{koren2009}
+  Y.~Koren, R.~Bell, and C.~Volinsky, ``Matrix factorization techniques for recommender systems,'' \emph{Computer}, vol.~42, no.~8, pp.~30--37, 2009.
+
+  \bibitem{harper2015}
+  F.~M. Harper and J.~A. Konstan, ``The MovieLens datasets: History and context,'' \emph{ACM Trans. Interact. Intell. Syst.}, vol.~5, no.~4, Art.~19, 2015.
+
+  \bibitem{resnick1994}
+  P.~Resnick, N.~Iacovou, M.~Suchak, P.~Bergstrom, and J.~Riedl, ``GroupLens: An open architecture for collaborative filtering of netnews,'' in \emph{Proc. ACM Conf. Computer Supported Cooperative Work (CSCW)}, 1994, pp.~175--186.
+
+  \bibitem{burke2002}
+  R.~Burke, ``Hybrid recommender systems: Survey and experiments,'' \emph{User Model. User-Adapt. Interact.}, vol.~12, no.~4, pp.~331--370, 2002.
+
+  \bibitem{ricci2015}
+  F.~Ricci, L.~Rokach, and B.~Shapira, Eds., \emph{Recommender Systems Handbook}, 2nd~ed. New York, NY, USA: Springer, 2015.
+
+  \bibitem{salton1988}
+  G.~Salton and C.~Buckley, ``Term-weighting approaches in automatic text retrieval,'' \emph{Inf. Process. Manag.}, vol.~24, no.~5, pp.~513--523, 1988.
+
+  \bibitem{hug2020}
+  N.~Hug, ``Surprise: A Python library for recommender systems,'' \emph{J. Open Source Softw.}, vol.~5, no.~52, p.~2174, 2020.
+
+  \bibitem{funk2006}
+  S.~Funk, ``Netflix update: Try this at home,'' \emph{Simon Funk's Weblog}, Dec.~11, 2006.
+
+  \bibitem{herlocker2004}
+  J.~L. Herlocker, J.~A. Konstan, L.~G. Terveen, and J.~T. Riedl, ``Evaluating collaborative filtering recommender systems,'' \emph{ACM Trans. Inf. Syst.}, vol.~22, no.~1, pp.~5--53, 2004.
+
+  \bibitem{lops2011}
+  P.~Lops, M.~de~Gemmis, and G.~Semeraro, ``Content-based recommender systems: State of the art and trends,'' in \emph{Recommender Systems Handbook}. Springer, 2011, pp.~73--105.
+
+  \bibitem{schein2002}
+  A.~I. Schein, A.~Popescul, L.~H. Ungar, and D.~M. Pennock, ``Methods and metrics for cold-start recommendations,'' in \emph{Proc. 25th ACM SIGIR Conf.}, 2002, pp.~253--260.
+
+  \bibitem{vargas2011}
+  S.~Vargas and P.~Castells, ``Rank and relevance in novelty and diversity metrics for recommender systems,'' in \emph{Proc. 5th ACM Conf. Recommender Systems (RecSys)}, 2011, pp.~109--116.
+
+  \bibitem{pedregosa2011}
+  F.~Pedregosa \emph{et al.}, ``Scikit-learn: Machine learning in Python,'' \emph{J. Mach. Learn. Res.}, vol.~12, pp.~2825--2830, 2011.
+
+  \bibitem{sarwar2001}
+  B.~Sarwar, G.~Karypis, J.~Konstan, and J.~Riedl, ``Item-based collaborative filtering recommendation algorithms,'' in \emph{Proc. 10th Int. World Wide Web Conf. (WWW)}, 2001, pp.~285--295.
+
+  \bibitem{adomavicius2005}
+  G.~Adomavicius and A.~Tuzhilin, ``Toward the next generation of recommender systems: A survey of the state-of-the-art and possible extensions,'' \emph{IEEE Trans. Knowl. Data Eng.}, vol.~17, no.~6, pp.~734--749, 2005.
+
+  \bibitem{steck2018}
+  H.~Steck, ``Calibrated recommendations,'' in \emph{Proc. 12th ACM Conf. Recommender Systems (RecSys)}, 2018, pp.~560--564.
+
+  \bibitem{abdollahpouri2019}
+  H.~Abdollahpouri, M.~Mansoury, R.~Burke, and B.~Mobasher, ``The unfairness of popularity bias in recommendation,'' in \emph{Proc. ACM RecSys Workshop on Recommendation in Multi-Stakeholder Environments}, 2019, pp.~1--7.
+
+  \bibitem{jannach2015}
+  D.~Jannach, L.~Lerche, I.~Kamehkhosh, and M.~Jugovac, ``What recommenders recommend: An analysis of recommendation biases and possible countermeasures,'' \emph{User Model. User-Adapt. Interact.}, vol.~25, no.~5, pp.~427--491, 2015.
+
+  \bibitem{abdollahpouri2017}
+  H.~Abdollahpouri, R.~Burke, and B.~Mobasher, ``Controlling popularity bias in learning-to-rank recommendation,'' in \emph{Proc. 11th ACM Conf. Recommender Systems (RecSys)}, 2017, pp.~42--46.
+
+  \bibitem{carbonell1998}
+  J.~Carbonell and J.~Goldstein, ``The use of MMR, diversity-based reranking for reordering documents and producing summaries,'' in \emph{Proc. 21st ACM SIGIR Conf.}, 1998, pp.~335--336.
+
+  \bibitem{holm1979}
+  S.~Holm, ``A simple sequentially rejective multiple test procedure,'' \emph{Scand. J. Statist.}, vol.~6, no.~2, pp.~65--70, 1979.
+
+  \bibitem{kaya2019}
+  M.~Kaya and D.~Bridge, ``A comparison of calibrated and intent-aware recommendations,'' in \emph{Proc. 13th ACM Conf. Recommender Systems (RecSys)}, 2019, pp.~151--159.
+
+  \bibitem{rendle2009}
+  S.~Rendle, C.~Freudenthaler, Z.~Gantner, and L.~Schmidt-Thieme, ``BPR: Bayesian personalized ranking from implicit feedback,'' in \emph{Proc. 25th Conf. Uncertainty in Artificial Intelligence (UAI)}, 2009, pp.~452--461.
+
+  \end{thebibliography}
+
+  \end{document}
