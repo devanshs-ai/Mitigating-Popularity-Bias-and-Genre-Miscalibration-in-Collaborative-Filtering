@@ -109,3 +109,4 @@ def plot_pareto():
 
 if __name__ == "__main__":
     plot_pareto()
+
