@@ -306,7 +306,22 @@ To evaluate whether genre calibration holds across the population rather than in
 
 ---
 
-### 4.6 Individual Contributions of Project Members
+### 4.6 Ablation Studies & Popularity Penalty Baseline (Figure 6)
+To dissect the mechanics of our framework and address potential baseline alternatives, we conducted three controlled ablations across the 497 test users:
+
+1. **Candidate Pool Sweep ($M \in \{100, 200, 500\}$):**  
+   As hypothesized, a restricted candidate pool of $M = 100$ caps long-tail discovery because SVD's top 100 outputs are overwhelmingly blockbusters. Expanding the pool to $M = 500$ allows the novelty regularizer to achieve a **5.2x increase in long-tail exposure** ($1.23\% \to 6.38\%$), with catalog coverage rising to $5.79\%$ and $D_{KL}$ falling to $0.1448$, at an NDCG of $0.0368$.
+2. **Novelty Regularization Sweep ($\gamma \in [0.0, 0.20]$):**  
+   Varying $\gamma$ at $M = 200$ traces the direct accuracy-versus-novelty frontier: setting $\gamma = 0.05$ yields a balanced configuration (NDCG $0.0467$, novelty $11.01$ bits, long-tail $2.94\%$), whereas aggressive weighting ($\gamma = 0.20$) achieves $9.40\%$ long-tail exposure ($12.11$ bits) at an NDCG of $0.0290$.
+3. **Comparison against Heuristic Popularity Penalties:**  
+   We implemented an ad-hoc popularity penalty baseline: $\text{Score}(i) = \widehat{r}_{ui} - \beta \cdot \log(1 + \text{count}_{\text{train}}(i))$. While increasing $\beta$ forces long-tail exposure, it blindly penalizes items without respecting authentic user tastes, leading to severe genre distortion ($D_{KL} = 1.5372$ at $\beta = 0.05$ and $D_{KL} = 2.0875$ at $\beta = 0.20$) and collapsing NDCG ($0.0331 \to 0.0035$).
+
+**Figure 6: Pareto Frontier: Accuracy vs. Long-Tail Discovery Trade-off**  
+Figure 6 plots NDCG@10 (y-axis) against Long-Tail Item Exposure Ratio (%) (x-axis) for both the proposed framework ($\gamma$ sweep) and the popularity penalty baseline ($\beta$ sweep). The proposed framework's Pareto curve dominates the penalty baseline across the entire frontier, demonstrating that principled genre calibration combined with novelty regularization achieves long-tail exploration with far superior accuracy retention.
+
+---
+
+### 4.7 Individual Contributions of Project Members
 - **[Student Name 1]:** Implemented the data pipeline, feature engineering, Bayesian popularity baseline, MMR re-ranking module, and statistical testing scripts.
 - **[Student Name 2]:** Implemented regularized SVD matrix factorization, calibrated re-ranking algorithm, independent Total Variation Distance metric, validation tuning experiments, and figure generation.
 - **Joint Effort:** Drafted the academic report, synthesized literature, and authored the repository documentation.
