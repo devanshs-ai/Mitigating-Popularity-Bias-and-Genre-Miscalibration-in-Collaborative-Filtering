@@ -176,23 +176,43 @@
   MMR \cite{carbonell1998} greedily selects the item maximizing $\theta\,\widehat{r}^{\text{norm}}_{ui}-(1-\theta)\max_{j\in R_u}\cos(\mathbf{v}_i,\mathbf{v}_j)$, where $\mathbf{v}_i$ are TF-IDF item vectors \cite{salton1988}. The trade-off $\theta\in[0.2,0.8]$ was tuned on the validation cohort ($\theta^*=0.20$, selecting maximum intra-list diversity).
 
   \subsubsection{Calibration Quantities}
-  Let $\mathcal{G}$ be the $C=19$ genres. The user's genre distribution is
+  Let $\mathcal{G}$ be the set of $C=19$ genres. The user's genre distribution is
   \begin{equation}
-  p(g\mid u)=\frac{w(g\mid u)+\epsilon}{\sum_{g'}w(g'\mid u)+C\epsilon},\quad w(g\mid u)=\sum_{i\in\mathcal{I}_u}\tfrac{r_{ui}}{5}\,\mathbb{I}(g\in\mathrm{genres}(i)),
+  \begin{aligned}
+  p(g\mid u)
+  &=\frac{w(g\mid u)+\epsilon}{\sum_{g'}w(g'\mid u)+C\epsilon},\\
+  w(g\mid u)
+  &=\sum_{i\in\mathcal{I}_u}\frac{r_{ui}}{5}\,\mathbb{I}\bigl(g\in\mathrm{genres}(i)\bigr),
+  \end{aligned}
   \end{equation}
-  with $\epsilon=10^{-5}$, and the list distribution is
+  where $\epsilon=10^{-5}$. The list distribution is
   \begin{equation}
-  q(g\mid R_u)=\frac{\sum_{i\in R_u}\mathbb{I}(g\in\mathrm{genres}(i))+\epsilon}{\sum_{g'}\sum_{i\in R_u}\mathbb{I}(g'\in\mathrm{genres}(i))+C\epsilon}.
+  q(g\mid R_u)
+  =\frac{\sum_{i\in R_u}\mathbb{I}(g\in\mathrm{genres}(i))+\epsilon}{\sum_{g'}\sum_{i\in R_u}\mathbb{I}(g'\in\mathrm{genres}(i))+C\epsilon}.
   \end{equation}
-  Calibration error is $\KL(P\parallel Q)=\sum_{g}p(g\mid u)\log\frac{p(g\mid u)}{q(g\mid R_u)}$. Item novelty is the self-information $\mathrm{Nov}(i)=-\log_2\frac{\max(\mathrm{count}(i),1)}{|\mathcal{R}_{\text{train}}|}$.
+  The calibration error is
+  \begin{equation}
+  \KL(P\parallel Q)
+  =\sum_g p(g\mid u)\log\frac{p(g\mid u)}{q(g\mid R_u)}.
+  \end{equation}
+  Item novelty is the self-information
+  \begin{equation}
+  \mathrm{Nov}(i)
+  =-\log_2\frac{\max(\mathrm{count}(i),1)}{|\mathcal{R}_{\text{train}}|}.
+  \end{equation}
 
   \subsubsection{Calibrated and Novelty-Aware Re-ranking}\label{sec:obj}
   From the top-$M$ SVD candidates $\mathcal{C}_u$, items are added greedily until $|R_u|=K$:
   \begin{equation}
-  i^{*}=\argmax_{i\in\mathcal{C}_u\setminus R_u}\Big[(1-\lambda)\,\widehat{r}^{\text{norm}}_{ui}-\lambda\,\KL\big(P(u)\parallel Q(R_u\cup\{i\})\big)+\gamma\,\mathrm{Nov}^{\text{norm}}(i)\Big],
   \label{eq:obj}
+  \begin{aligned}
+  i^*=\argmax_{i\in\mathcal{C}_u\setminus R_u} \Big[
+    &(1-\lambda)\,\widehat{r}^{\text{norm}}_{ui}\\
+    &-\lambda\,\KL\bigl(P(u)\parallel Q(R_u\cup\{i\})\bigr)\\
+    &+\gamma\,\mathrm{Nov}^{\text{norm}}(i)\Big].
+  \end{aligned}
   \end{equation}
-  where $\widehat{r}^{\text{norm}}_{ui}$ and $\mathrm{Nov}^{\text{norm}}$ are min--max normalized over the pool. Setting $\lambda=\gamma=0$ gives Plain SVD; $\gamma=0,\lambda>0$ gives a \emph{Steck-style} calibrated re-ranker (our smoothing uses a fixed $\epsilon$ rather than Steck's mixing of $Q$ with $P$ \cite{steck2018}); $\gamma>0,\lambda>0$ is the proposed method. Algorithm~\ref{alg:rerank} gives the procedure.
+  Here, $\widehat{r}^{\text{norm}}_{ui}$ and $\mathrm{Nov}^{\text{norm}}(i)$ are min--max normalized over the candidate pool. Setting $\lambda=\gamma=0$ gives Plain SVD; $\gamma=0,\lambda>0$ gives a \emph{Steck-style} calibrated re-ranker (our smoothing uses a fixed $\epsilon$ rather than Steck's mixing of $Q$ with $P$ \cite{steck2018}); and $\gamma>0,\lambda>0$ gives the proposed method. Algorithm~\ref{alg:rerank} describes the procedure.
 
   \begin{algorithm}[t]
   \caption{Calibrated and Novelty-Aware Greedy Re-ranking}
@@ -509,4 +529,4 @@
 
   \end{thebibliography}
 
-  \end{document}
+  \end{documnt}
